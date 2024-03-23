@@ -1,12 +1,16 @@
----
-tags: digital-resilience, resilience, internet-shutdown, digiresi, civil-defense, 民防, 數位韌性松, DigiResiTh0n, hackathon, civil defense, 
----
-
 # 重要數位服務韌性檢測
+
+###### tags: digital-resilience, 數位韌性松, DigiResiTh0n
+
+> [License under CC0, No Rights Reserved](https://creativecommons.org/public-domain/cc0/)
+> [![Colloborate on HackMD](badge.svg)](https://g0v.hackmd.io/@irvin/digital-services-resilience)
+
 
 ```
 在天災人禍導致「台灣對外斷網」時，希望能盡量維持正常運作的重要網路服務。
 ```
+
+---
 
 **情境：** 2023年初，馬祖的對外海纜被中國的拖網漁船/挖沙船「意外」挖斷，因而斷網長達數個月。假設此一情境發生在台灣，台灣對外網路骨幹海纜斷了八九成（甚至完全中斷），有哪些服務，是維持*基本生活品質*必要的服務，應在「只有島內網路」的狀態下維持正常運作？
 

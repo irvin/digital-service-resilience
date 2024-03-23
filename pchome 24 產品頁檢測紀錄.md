@@ -1,5 +1,13 @@
 # pchome 24 產品頁檢測紀錄
 
+###### tags: digital-resilience, 數位韌性松, DigiResiTh0n
+
+> [License under CC0, No Rights Reserved](https://creativecommons.org/public-domain/cc0/)
+>
+> [![Colloborate on HackMD](badge.svg)](https://g0v.hackmd.io/@irvin/service-resilience-result-pchome24-product)
+
+---
+
  | #  | accessable  | IP  | Canonical  | Anycast | Geo location  | Cloud services  | URI  | 
  | ---  | ---  | ---  | ---  | ---  | ---  | ---  |  ---  | 
  | 1  | O  | 34.149.253.14  | shopping.gs1.pchome.com.tw  | true  | Kansas City, Missouri, US  | GCP  | https://24h.pchome.com.tw/prod/DCAYAD-A900BIAMV  | 
