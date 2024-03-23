@@ -5,6 +5,8 @@
 > [License under CC0, No Rights Reserved](https://creativecommons.org/public-domain/cc0/)
 >
 > [![Colloborate on HackMD](badge.svg)](https://g0v.hackmd.io/@irvin/service-resilience-result-pchome24-product)
+> 
+> [github archive](https://github.com/irvin/digital-service-resilience/blob/main/pchome%2024%20產品頁檢測紀錄.md)
 
 ---
 
