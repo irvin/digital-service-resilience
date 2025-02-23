@@ -8,10 +8,11 @@
 
 const { chromium } = require('playwright');
 const axios = require('axios');
-const IPinfo = require('node-ipinfo');
+// const { IPinfoWrapper } = require('node-ipinfo');
+const dns = require('dns').promises;
 
 // 建立 ipinfo client
-const ipinfo = new IPinfoWrapper(process.env.IPINFO_TOKEN || undefined);
+// const ipinfo = new IPinfoWrapper(process.env.IPINFO_TOKEN || undefined);
 
 // 可忽略的域名列表
 const IGNORABLE_DOMAINS = [
@@ -89,12 +90,29 @@ function cleanHARData(requests) {
     }, {});
 }
 
+async function getDomainIP(domain) {
+    try {
+        const records = await dns.resolve4(domain);
+        return records[0]; // 返回第一個 IPv4 地址
+    } catch (error) {
+        console.error(`無法解析域名 ${domain}:`, error.message);
+        return null;
+    }
+}
+
+/*
 async function checkIPLocationWithSDK(domain) {
     try {
-        const response = await ipinfo.lookupIp(domain);
+        const ip = await getDomainIP(domain);
+        if (!ip) {
+            throw new Error(`無法獲取 ${domain} 的 IP 地址`);
+        }
+        
+        const response = await ipinfo.lookupIp(ip);
         return {
             source: 'sdk',
             domain,
+            ip,
             ...response
         };
     } catch (error) {
@@ -107,24 +125,31 @@ async function checkIPLocationWithSDK(domain) {
         };
     }
 }
+*/
 
 async function checkIPLocationWithAPI(domain) {
     try {
-        const response = await axios.get(`https://ipinfo.io/${domain}/json`, {
+        const ip = await getDomainIP(domain);
+        if (!ip) {
+            throw new Error(`無法獲取 ${domain} 的 IP 地址`);
+        }
+
+        const response = await axios.get(`https://ipinfo.io/${ip}/json`, {
             headers: {
                 'Accept': 'application/json'
             }
         });
 
         return {
-            source: 'api',
+            source: 'json api',
             domain,
+            ip,
             ...response.data
         };
     } catch (error) {
         console.error(`[API] 檢查 ${domain} 失敗:`, error.message);
         return {
-            source: 'api',
+            source: 'json api',
             domain,
             error: true,
             message: error.message
@@ -133,6 +158,7 @@ async function checkIPLocationWithAPI(domain) {
 }
 
 async function checkIPLocation(domain) {
+    /*
     const [sdkResult, apiResult] = await Promise.all([
         checkIPLocationWithSDK(domain),
         checkIPLocationWithAPI(domain)
@@ -145,9 +171,13 @@ async function checkIPLocation(domain) {
         console.log('SDK:', sdkResult);
         console.log('API:', apiResult);
     }
+    */
 
     // 優先使用 SDK 的結果
-    return sdkResult;
+    // return sdkResult;
+
+    const apiResult = await checkIPLocationWithAPI(domain);    
+    return apiResult;
 }
 
 function calculateResilience(ipInfoResults) {
