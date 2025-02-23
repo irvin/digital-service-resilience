@@ -28,11 +28,12 @@
 
 ## 韌性檢測結果
 
+最新檢測紀錄請見： https://github.com/irvin/digital-service-resilience-test-result
 
 | 服務 | 斷網耐受性 | 檢測紀錄 |
 | -------- | -------- | -------- |
-| Pchome 24 產品頁 |  | [檢測紀錄](/5siiuEN1RAuFAI2H7l-phQ)
-| MoMo 產品頁 |  | [檢測紀錄](/9JfXRBRbSV2wE3ULGIL-XA)
+| Pchome 24 產品頁 |  | [檢測紀錄](https://github.com/irvin/digital-service-resilience-test-result/blob/main/24h.pchome.com.tw_2025-02-23T10-25-06-844Z.json)
+| MoMo 產品頁 |  | [檢測紀錄](https://github.com/irvin/digital-service-resilience-test-result/blob/main/www.momoshop.com.tw_2025-02-23T10-16-51-163Z.json)
 
 ---
 
