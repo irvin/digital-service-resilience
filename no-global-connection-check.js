@@ -252,6 +252,11 @@ function formatDomainDetail(result, cleanedData, resilience) {
 
 async function checkWebsiteResilience(url, options = {}) {
     try {
+        // 確保 URL 有 protocol
+        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+            url = 'https://' + url;
+        }
+
         console.log(`開始檢測網站: ${url}`);
         
         // 取得測試環境資訊
@@ -326,12 +331,12 @@ async function checkWebsiteResilience(url, options = {}) {
         // 如果指定要儲存結果
         if (options.save) {
             // 確保目錄存在
-            await fs.mkdir('test_result', { recursive: true });
+            await fs.mkdir('test_results', { recursive: true });
             
             // 自動生成輸出檔名
             const urlObj = new URL(url);
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            const outputPath = path.resolve(`test_result/${urlObj.hostname}_${timestamp}.json`);
+            const outputPath = path.resolve(`test_results/${urlObj.hostname}_${timestamp}.json`);
             
             // 儲存結果
             await fs.writeFile(outputPath, JSON.stringify(result, null, 2));
@@ -351,6 +356,11 @@ if (require.main === module) {
     let url = args[args.length - 1];
     let customDNS = null;
     let save = false;
+
+    // 確保 URL 有 protocol
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        url = 'https://' + url;
+    }
 
     // 解析命令列參數
     const dnsIndex = args.indexOf('--dns');
