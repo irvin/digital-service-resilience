@@ -206,13 +206,66 @@ function calculateResilience(ipInfoResults) {
     return scores;
 }
 
+async function getLocalIPInfo() {
+    try {
+        // 使用 ipinfo.io 取得本機的公開 IP 資訊
+        const response = await axios.get('https://ipinfo.io/json', {
+            headers: {
+                'Accept': 'application/json'
+            }
+        });
+        return {
+            ...response.data,
+            source: 'json api'
+        };
+    } catch (error) {
+        console.error('無法取得測試環境資訊:', error.message);
+        return {
+            error: true,
+            message: error.message
+        };
+    }
+}
+
+function formatDomainDetail(result, cleanedData, resilience) {
+    const originalRequest = Object.values(cleanedData).find(
+        req => new URL(req.url).hostname === result.domain
+    );
+    
+    return {
+        originalUrl: originalRequest?.url,
+        type: originalRequest?.type,
+        ipinfo: {
+            domain: result.domain,
+            ip: result.ip,
+            hostname: result.hostname,
+            city: result.city,
+            region: result.region,
+            country: result.country,
+            loc: result.loc,
+            org: result.org,
+            timezone: result.timezone
+        },
+        score: resilience.details.find(d => d.domain === result.domain)?.score
+    };
+}
+
 async function checkWebsiteResilience(url, options = {}) {
     try {
         console.log(`開始檢測網站: ${url}`);
+        
+        // 取得測試環境資訊
+        const localIPInfo = await getLocalIPInfo();
+        if (!localIPInfo.error) {
+            console.log('\n測試環境資訊:');
+            console.log('-------------------');
+            console.log(localIPInfo);
+        }
+
         if (options.customDNS) {
-            console.log('使用自訂 DNS 伺服器:', options.customDNS);
+            console.log('\n使用自訂 DNS 伺服器:', options.customDNS);
         } else {
-            console.log('使用本機 DNS 伺服器:', dns.getServers());
+            console.log('\n使用本機 DNS 伺服器:', dns.getServers());
         }
 
         // 1. 收集 HAR
@@ -243,34 +296,31 @@ async function checkWebsiteResilience(url, options = {}) {
         console.log('-------------------');
         locationResults.forEach(result => {
             console.log(`\n${result.domain}:`);
-            console.log(result);
+            console.log(formatDomainDetail(result, cleanedData, resilience));
         });
 
         // 準備結果資料
         const result = {
             url,
             timestamp: new Date().toISOString(),
-            dnsServers: {
-                type: options.customDNS ? 'custom' : 'system',
-                servers: options.customDNS ? [options.customDNS] : dns.getServers()
+            testingEnvironment: {
+                ip: localIPInfo.ip,
+                ...localIPInfo,
+                dnsServers: {
+                    type: options.customDNS ? 'custom' : 'system',
+                    servers: options.customDNS ? [options.customDNS] : dns.getServers()
+                }
             },
             requestCount: requests.length,
             uniqueDomains: domains.length,
-            scores: {
+            test_results: {
                 domestic: resilience.domestic,
                 cloud: resilience.cloud,
                 foreign: resilience.foreign
             },
-            domainDetails: locationResults.map(result => ({
-                domain: result.domain,
-                ip: result.ip,
-                country: result.country,
-                region: result.region,
-                city: result.city,
-                org: result.org,
-                timezone: result.timezone,
-                score: resilience.details.find(d => d.domain === result.domain)?.score
-            }))
+            domainDetails: locationResults.map(result => 
+                formatDomainDetail(result, cleanedData, resilience)
+            )
         };
 
         // 如果指定要儲存結果
