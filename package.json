@@ -1,0 +1,20 @@
+{
+  "name": "digital-service-resilience",
+  "version": "0.0.1",
+  "description": "檢測網站在台灣對外斷網時的韌性",
+  "main": "no-global-connection-check.js",
+  "scripts": {
+    "postinstall": "npx playwright install chromium",
+    "check": "node no-global-connection-check.js"
+  },
+  "dependencies": {
+    "playwright": "^1.42.1",
+    "axios": "^1.6.7",
+    "node-ipinfo": "^4.0.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/irvin/digital-service-resilience"
+  },
+  "license": "CC0-1.0"
+} 
