@@ -172,7 +172,7 @@ async function checkIPLocation(domain, customDNS = null) {
 function calculateResilience(ipInfoResults) {
     const scores = {
         domestic: 0,    // O: 台灣境內
-        cloud: 0,       // -: 使用有台灣節點的雲端服務
+        cloud: 0,       // ?: 使用有台灣節點的雲端服務
         foreign: 0,     // X: 境外服務
         details: [],
         comparisons: [] // 新增比較結果
@@ -188,7 +188,7 @@ function calculateResilience(ipInfoResults) {
             score = 'O';
             scores.domestic++;
         } else if (CLOUD_PROVIDERS.some(provider => result.org?.toUpperCase().includes(provider))) {
-            score = '-';
+            score = '?';
             scores.cloud++;
         } else {
             score = 'X';
@@ -289,7 +289,7 @@ async function checkWebsiteResilience(url, options = {}) {
         console.log('\n檢測結果:');
         console.log('-------------------');
         console.log(`境內服務 (O): ${resilience.domestic}`);
-        console.log(`雲端服務 (-): ${resilience.cloud}`);
+        console.log(`有國內節點的雲端服務 (?): ${resilience.cloud}`);
         console.log(`境外服務 (X): ${resilience.foreign}`);
         
         console.log('\n詳細資訊:');
@@ -315,7 +315,7 @@ async function checkWebsiteResilience(url, options = {}) {
             uniqueDomains: domains.length,
             test_results: {
                 domestic: resilience.domestic,
-                cloud: resilience.cloud,
+                cloud_w_domestic_node: resilience.cloud,
                 foreign: resilience.foreign
             },
             domainDetails: locationResults.map(result => 

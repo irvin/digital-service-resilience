@@ -31,8 +31,8 @@
 
 | 服務 | 斷網耐受性 | 檢測紀錄 |
 | -------- | -------- | -------- |
-| Pchome 24 產品頁 | pass | [檢測紀錄](/5siiuEN1RAuFAI2H7l-phQ)
-| MoMo 產品頁 | pass | [檢測紀錄](/9JfXRBRbSV2wE3ULGIL-XA)
+| Pchome 24 產品頁 |  | [檢測紀錄](/5siiuEN1RAuFAI2H7l-phQ)
+| MoMo 產品頁 |  | [檢測紀錄](/9JfXRBRbSV2wE3ULGIL-XA)
 
 ---
 
@@ -142,7 +142,7 @@ node no-global-connection-check.js https://example.com
 
 ### 檢測結果說明
 - O：服務位於台灣境內
-- -：使用具有台灣節點的雲端服務（如 Google Cloud、AWS 等）
+- ?：使用具有台灣節點的雲端服務（如 Google Cloud、AWS 等）
 - X：位於境外且非雲端服務
 
 ### 範例輸出
@@ -154,7 +154,7 @@ node no-global-connection-check.js https://example.com
 檢測結果:
 -------------------
 境內服務 (O): 3
-雲端服務 (-): 5
+雲端服務 (?): 5
 境外服務 (X): 1
 
 詳細資訊:
