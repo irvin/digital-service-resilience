@@ -6,6 +6,7 @@
     2) node no-global-connection-check.js https://24h.pchome.com.tw/prod/DCAYAD-A900BIAMV
 */
 
+require('dotenv').config();
 const { chromium } = require('playwright');
 const axios = require('axios');
 // const { IPinfoWrapper } = require('node-ipinfo');
@@ -270,6 +271,10 @@ async function checkWebsiteResilience(url, options = {}) {
 
         console.log(`開始檢測網站: ${url}`);
         
+        // 使用環境變數中的 DNS（如果有指定的話）
+        const envDNS = process.env.DEFAULT_DNS;
+        const customDNS = options.customDNS || envDNS;
+
         // 取得測試環境資訊
         const localIPInfo = await getLocalIPInfo(options);
         if (!localIPInfo.error) {
@@ -278,8 +283,8 @@ async function checkWebsiteResilience(url, options = {}) {
             console.log(localIPInfo);
         }
 
-        if (options.customDNS) {
-            console.log('\n使用自訂 DNS 伺服器:', options.customDNS);
+        if (customDNS) {
+            console.log('\n使用自訂 DNS 伺服器:', customDNS);
         } else {
             console.log('\n使用本機 DNS 伺服器:', dns.getServers());
         }
@@ -295,7 +300,7 @@ async function checkWebsiteResilience(url, options = {}) {
 
         // 3. 檢查每個域名
         const locationResults = await Promise.all(
-            domains.map(domain => checkIPLocation(domain, options.customDNS))
+            domains.map(domain => checkIPLocation(domain, customDNS))
         );
 
         // 4. 計算韌性分數
@@ -323,8 +328,8 @@ async function checkWebsiteResilience(url, options = {}) {
                 ip: localIPInfo.ip,
                 ...localIPInfo,
                 dnsServers: {
-                    type: options.customDNS ? 'custom' : 'system',
-                    servers: options.customDNS ? [options.customDNS] : dns.getServers()
+                    type: customDNS ? 'custom' : 'system',
+                    servers: customDNS ? [customDNS] : dns.getServers()
                 }
             },
             requestCount: requests.length,
