@@ -49,7 +49,7 @@ const CLOUD_PROVIDERS = [
     'AKAMAI'
 ];
 
-async function collectHAR(url) {
+async function collectHARAndCanonical(url) {
     const browser = await chromium.launch();
     const context = await browser.newContext({
         bypassCSP: true,
@@ -58,23 +58,32 @@ async function collectHAR(url) {
     
     const page = await context.newPage();
     
-    // 開始收集 HAR
-    await context.tracing.start({ snapshots: true, screenshots: true });
-    
-    // 訪問頁面
-    await page.goto(url);
-    await page.waitForLoadState('networkidle');
-    
-    // 獲取 HAR 數據
-    const requests = await page.evaluate(() => {
-        return performance.getEntriesByType('resource').map(entry => ({
-            url: entry.name,
-            type: entry.initiatorType
-        }));
-    });
-    
-    await browser.close();
-    return requests;
+    try {
+        // 開始收集 HAR
+        await context.tracing.start({ snapshots: true, screenshots: true });
+        
+        // 訪問頁面
+        await page.goto(url);
+        await page.waitForLoadState('networkidle');
+        
+        // 嘗試獲取 canonical URL
+        const canonical = await page.evaluate(() => {
+            const canonicalLink = document.querySelector('link[rel="canonical"]');
+            return canonicalLink ? canonicalLink.href : window.location.href;
+        });
+        
+        // 獲取 connection 數據
+        const requests = await page.evaluate(() => {
+            return performance.getEntriesByType('resource').map(entry => ({
+                url: entry.name,
+                type: entry.initiatorType
+            }));
+        });
+        
+        return { requests, canonical };
+    } finally {
+        await browser.close();
+    }
 }
 
 function cleanHARData(requests) {
@@ -271,6 +280,16 @@ async function checkWebsiteResilience(url, options = {}) {
 
         console.log(`開始檢測網站: ${url}`);
         
+        // 1. 收集 connections 和 canonical URL
+        const { requests, canonical: canonicalURL } = await collectHARAndCanonical(url);
+        
+        if (canonicalURL !== url) {
+            console.log(`檢測到 canonical URL: ${canonicalURL}`);
+            url = canonicalURL;
+        }
+        
+        console.log(`收集到 ${requests.length} 個請求`);
+
         // 使用環境變數中的 DNS（如果有指定的話）
         const envDNS = process.env.DEFAULT_DNS;
         const customDNS = options.customDNS || envDNS;
@@ -288,10 +307,6 @@ async function checkWebsiteResilience(url, options = {}) {
         } else {
             console.log('\n使用本機 DNS 伺服器:', dns.getServers());
         }
-
-        // 1. 收集 HAR
-        const requests = await collectHAR(url);
-        console.log(`收集到 ${requests.length} 個請求`);
 
         // 2. 清理資料
         const cleanedData = cleanHARData(requests);
@@ -323,6 +338,7 @@ async function checkWebsiteResilience(url, options = {}) {
         // 準備結果資料
         const result = {
             url,
+            canonicalURL,     // 只保留 canonicalURL
             timestamp: new Date().toISOString(),
             testingEnvironment: {
                 ip: localIPInfo.ip,
@@ -349,9 +365,9 @@ async function checkWebsiteResilience(url, options = {}) {
             // 確保目錄存在
             await fs.mkdir('test_results', { recursive: true });
             
-            // 自動生成輸出檔名
-            const urlObj = new URL(url);
-            const filename = `${urlObj.hostname}${urlObj.pathname.replace(/\//g, '_')}`;
+            // 自動生成輸出檔名 - 使用 canonical URL
+            const urlObj = new URL(canonicalURL);
+            const filename = `${urlObj.hostname}${urlObj.pathname.replace(/\//g, '_')}`.replace(/_+$/, '');
             const outputPath = path.resolve(`test_results/${filename}.json`);
             
             // 儲存結果
