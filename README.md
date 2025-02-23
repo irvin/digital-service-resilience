@@ -31,8 +31,8 @@
 
 | 服務 | 斷網耐受性 | 檢測紀錄 |
 | -------- | -------- | -------- |
-| Pchome 24 產品頁 | pass | [檢測紀錄](/5siiuEN1RAuFAI2H7l-phQ)
-| MoMo 產品頁 | pass | [檢測紀錄](/9JfXRBRbSV2wE3ULGIL-XA)
+| Pchome 24 產品頁 |  | [檢測紀錄](/5siiuEN1RAuFAI2H7l-phQ)
+| MoMo 產品頁 |  | [檢測紀錄](/9JfXRBRbSV2wE3ULGIL-XA)
 
 ---
 
@@ -117,3 +117,48 @@
         
     c. 最終以 `X` 與 `-` 的數字評估該網頁的耐受度。以 [pchome 產品頁](/
     ) 為例，共 7 個 `O` 位於境內、10 個 `-` 使用雲端服務可能有耐受性，沒有任何 `X` 非雲端的境外節點。
+
+## d) 自動化檢測工具
+
+### 安裝步驟
+```bash
+git clone https://github.com/irvin/digital-service-resilience.git
+cd digital-service-resilience
+npm install
+```
+
+### （optional）設定 IPinfo Token
+```bash
+export IPINFO_TOKEN=your_token_here  # Linux/Mac
+set IPINFO_TOKEN=your_token_here     # Windows CMD
+$env:IPINFO_TOKEN="your_token_here"  # Windows PowerShell
+```
+
+### 使用方式
+```bash
+npm check https://example.com
+node no-global-connection-check.js https://example.com
+```
+
+### 檢測結果說明
+- O：服務位於台灣境內
+- ?：使用具有台灣節點的雲端服務（如 Google Cloud、AWS 等）
+- X：位於境外且非雲端服務
+
+### 範例輸出
+```
+開始檢測網站: https://example.com
+收集到 X 個請求
+清理後剩餘 Y 個唯一域名
+
+檢測結果:
+-------------------
+境內服務 (O): 3
+雲端服務 (?): 5
+境外服務 (X): 1
+
+詳細資訊:
+example.com: O (TW (HiNet))
+cdn.example.com: - (US (GOOGLE))
+api.example.com: X (US (Amazon))
+```
