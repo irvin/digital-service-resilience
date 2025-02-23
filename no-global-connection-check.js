@@ -67,10 +67,15 @@ async function collectHARAndCanonical(url) {
         await page.waitForLoadState('networkidle');
         
         // 嘗試獲取 canonical URL
-        const canonical = await page.evaluate(() => {
+        const canonical = await page.evaluate((originalURL) => {
+            // 優先使用 canonical 標籤
             const canonicalLink = document.querySelector('link[rel="canonical"]');
-            return canonicalLink ? canonicalLink.href : window.location.href;
-        });
+            if (canonicalLink) {
+                return canonicalLink.href;
+            }
+            // 如果沒有 canonical 標籤，使用原始 URL
+            return originalURL;
+        }, url);
         
         // 獲取 connection 數據
         const requests = await page.evaluate(() => {
@@ -273,6 +278,9 @@ function formatDomainDetail(result, cleanedData, resilience) {
 
 async function checkWebsiteResilience(url, options = {}) {
     try {
+        // 保存原始輸入的 URL
+        const inputURL = url;
+
         // 確保 URL 有 protocol
         if (!url.startsWith('http://') && !url.startsWith('https://')) {
             url = 'https://' + url;
@@ -285,9 +293,8 @@ async function checkWebsiteResilience(url, options = {}) {
         
         if (canonicalURL !== url) {
             console.log(`檢測到 canonical URL: ${canonicalURL}`);
-            url = canonicalURL;
         }
-        
+
         console.log(`收集到 ${requests.length} 個請求`);
 
         // 使用環境變數中的 DNS（如果有指定的話）
@@ -337,8 +344,8 @@ async function checkWebsiteResilience(url, options = {}) {
 
         // 準備結果資料
         const result = {
-            url,
-            canonicalURL,     // 只保留 canonicalURL
+            url: inputURL,           // 使用原始輸入的 URL
+            canonicalURL,            // 保存實際訪問的 URL
             timestamp: new Date().toISOString(),
             testingEnvironment: {
                 ip: localIPInfo.ip,
@@ -367,7 +374,15 @@ async function checkWebsiteResilience(url, options = {}) {
             
             // 自動生成輸出檔名 - 使用 canonical URL
             const urlObj = new URL(canonicalURL);
-            const filename = `${urlObj.hostname}${urlObj.pathname.replace(/\//g, '_')}`.replace(/_+$/, '');
+            let filename = `${urlObj.hostname}${urlObj.pathname.replace(/\//g, '_')}${
+                urlObj.search ? '_' + urlObj.search.replace(/[?&=]/g, '_') : ''
+            }`.replace(/_+$/, '');
+            
+            // 如果檔名太長，直接截斷到 95 字元
+            if (filename.length > 95) {
+                filename = filename.slice(0, 95);
+            }
+            
             const outputPath = path.resolve(`test_results/${filename}.json`);
             
             // 儲存結果
