@@ -26,25 +26,25 @@
 
 ---
 
-## 韌性檢測結果
-
-最新檢測紀錄請見： https://github.com/irvin/digital-service-resilience-test-result
-
-| 服務 | 斷網耐受性 | 檢測紀錄 |
-| -------- | -------- | -------- |
-| Pchome 24 產品頁 |  | [檢測紀錄](https://github.com/irvin/digital-service-resilience-test-result/blob/main/24h.pchome.com.tw_2025-02-23T10-25-06-844Z.json)
-| MoMo 產品頁 |  | [檢測紀錄](https://github.com/irvin/digital-service-resilience-test-result/blob/main/www.momoshop.com.tw_2025-02-23T10-16-51-163Z.json)
-
----
-
-## a) 重要數位服務
+## 重要數位服務與韌性檢測結果
 
 社群共同列舉民生上重要的數位服務，及基礎架構相關服務。
 
--> [重要民生網站與數位服務（與其替代品）](/lmNxS58KQOm5Rf-H4SbvSw)
+範例：
+
+| 服務 | 斷網耐受性 | 檢測紀錄 |
+|---|---|---|
+| g0v.tw | 不會動 | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=g0v.tw) |
+| ocf.tw | 不會動 | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=ocf.tw) |
 
 
-## b) 服務韌性關鍵因素
+[重要數位民生服務（與其替代品）](/lmNxS58KQOm5Rf-H4SbvSw)
+
+最新檢測紀錄請見： https://github.com/irvin/web-resilience-test-result
+
+---
+
+## a) 服務韌性關鍵因素
 
 - 網站 hosting 主機 
     - 所在地 & API 所在地
@@ -61,7 +61,7 @@
     - 是否與網站一起 serve
 
 
-## c) 韌性檢測步驟
+## b) 韌性檢測步驟
 
 以 Pchome 產品頁 `https://24h.pchome.com.tw/prod/DCAYAD-A900BIAMV` 為例（[檢測過程紀錄](/5siiuEN1RAuFAI2H7l-phQ)）
 
@@ -119,7 +119,7 @@
     c. 最終以 `X` 與 `-` 的數字評估該網頁的耐受度。以 [pchome 產品頁](/
     ) 為例，共 7 個 `O` 位於境內、10 個 `-` 使用雲端服務可能有耐受性，沒有任何 `X` 非雲端的境外節點。
 
-## d) 自動化檢測工具
+## c) 自動化檢測工具
 
 ### 安裝步驟
 ```bash
