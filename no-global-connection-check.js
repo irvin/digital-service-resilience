@@ -134,14 +134,20 @@ async function checkIPLocationWithSDK(domain) {
 }
 */
 
-async function checkIPLocationWithAPI(domain, customDNS = null) {
+async function checkIPLocationWithAPI(domain, options = {}) {
     try {
-        const ip = await getDomainIP(domain, customDNS);
+        const ip = await getDomainIP(domain, options.customDNS);
         if (!ip) {
             throw new Error(`無法獲取 ${domain} 的 IP 地址`);
         }
 
-        const response = await axios.get(`https://ipinfo.io/${ip}/json`, {
+        // 優先使用命令列參數的 token，其次使用環境變數
+        const token = options.token || process.env.IPINFO_TOKEN;
+        const url = token 
+            ? `https://ipinfo.io/${ip}/json?token=${token}`
+            : `https://ipinfo.io/${ip}/json`;
+
+        const response = await axios.get(url, {
             headers: {
                 'Accept': 'application/json'
             }
@@ -165,7 +171,7 @@ async function checkIPLocationWithAPI(domain, customDNS = null) {
 }
 
 async function checkIPLocation(domain, customDNS = null) {
-    const apiResult = await checkIPLocationWithAPI(domain, customDNS);    
+    const apiResult = await checkIPLocationWithAPI(domain, { customDNS });    
     return apiResult;
 }
 
@@ -206,10 +212,15 @@ function calculateResilience(ipInfoResults) {
     return scores;
 }
 
-async function getLocalIPInfo() {
+async function getLocalIPInfo(options = {}) {
     try {
-        // 使用 ipinfo.io 取得本機的公開 IP 資訊
-        const response = await axios.get('https://ipinfo.io/json', {
+        // 優先使用命令列參數的 token，其次使用環境變數
+        const token = options.token || process.env.IPINFO_TOKEN;
+        const url = token 
+            ? 'https://ipinfo.io/json?token=' + token
+            : 'https://ipinfo.io/json';
+
+        const response = await axios.get(url, {
             headers: {
                 'Accept': 'application/json'
             }
@@ -260,7 +271,7 @@ async function checkWebsiteResilience(url, options = {}) {
         console.log(`開始檢測網站: ${url}`);
         
         // 取得測試環境資訊
-        const localIPInfo = await getLocalIPInfo();
+        const localIPInfo = await getLocalIPInfo(options);
         if (!localIPInfo.error) {
             console.log('\n測試環境資訊:');
             console.log('-------------------');
@@ -356,6 +367,7 @@ if (require.main === module) {
     let url = args[args.length - 1];
     let customDNS = null;
     let save = false;
+    let token = null;
 
     // 確保 URL 有 protocol
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
@@ -368,18 +380,24 @@ if (require.main === module) {
         customDNS = args[dnsIndex + 1];
     }
 
+    const tokenIndex = args.indexOf('--ipinfo-token');
+    if (tokenIndex !== -1 && args[tokenIndex + 1]) {
+        token = args[tokenIndex + 1];
+    }
+
     // 檢查是否要儲存結果
     save = args.includes('--save');
 
     if (!url || url.startsWith('--')) {
         console.error('請提供要檢測的網址');
+        console.error('使用方式:');
         console.error('  npm run check [--dns 8.8.8.8] [--save] https://example.com');
-        console.error('  node no-global-connection-check.js [--dns 8.8.8.8] [--save] https://example.com');
+        console.error('  npm run check [--dns 8.8.8.8] [--ipinfo-token your-token] [--save] https://example.com');
         process.exit(1);
     }
 
     // 執行檢測
-    checkWebsiteResilience(url, { customDNS, save })
+    checkWebsiteResilience(url, { customDNS, token, save })
         .then(result => {
             console.log('檢測完成');
         })
