@@ -11,6 +11,8 @@ const axios = require('axios');
 // const { IPinfoWrapper } = require('node-ipinfo');
 const dns = require('dns').promises;
 const { Resolver } = require('dns').promises;
+const fs = require('fs').promises;
+const path = require('path');
 
 // 建立 ipinfo client
 // const ipinfo = new IPinfoWrapper(process.env.IPINFO_TOKEN || undefined);
@@ -244,7 +246,49 @@ async function checkWebsiteResilience(url, options = {}) {
             console.log(result);
         });
 
-        return resilience;
+        // 準備結果資料
+        const result = {
+            url,
+            timestamp: new Date().toISOString(),
+            dnsServers: {
+                type: options.customDNS ? 'custom' : 'system',
+                servers: options.customDNS ? [options.customDNS] : dns.getServers()
+            },
+            requestCount: requests.length,
+            uniqueDomains: domains.length,
+            scores: {
+                domestic: resilience.domestic,
+                cloud: resilience.cloud,
+                foreign: resilience.foreign
+            },
+            domainDetails: locationResults.map(result => ({
+                domain: result.domain,
+                ip: result.ip,
+                country: result.country,
+                region: result.region,
+                city: result.city,
+                org: result.org,
+                timezone: result.timezone,
+                score: resilience.details.find(d => d.domain === result.domain)?.score
+            }))
+        };
+
+        // 如果指定要儲存結果
+        if (options.save) {
+            // 確保目錄存在
+            await fs.mkdir('test_result', { recursive: true });
+            
+            // 自動生成輸出檔名
+            const urlObj = new URL(url);
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const outputPath = path.resolve(`test_result/${urlObj.hostname}_${timestamp}.json`);
+            
+            // 儲存結果
+            await fs.writeFile(outputPath, JSON.stringify(result, null, 2));
+            console.log(`\n結果已儲存至: ${outputPath}`);
+        }
+
+        return result;
     } catch (error) {
         console.error('檢測過程發生錯誤:', error);
         throw error;
@@ -256,6 +300,7 @@ if (require.main === module) {
     const args = process.argv.slice(2);
     let url = args[args.length - 1];
     let customDNS = null;
+    let save = false;
 
     // 解析命令列參數
     const dnsIndex = args.indexOf('--dns');
@@ -263,15 +308,18 @@ if (require.main === module) {
         customDNS = args[dnsIndex + 1];
     }
 
+    // 檢查是否要儲存結果
+    save = args.includes('--save');
+
     if (!url || url.startsWith('--')) {
         console.error('請提供要檢測的網址');
-        console.error('  npm run check [--dns 8.8.8.8] https://example.com');
-        console.error('  node no-global-connection-check.js [--dns 8.8.8.8] https://example.com');
+        console.error('  npm run check [--dns 8.8.8.8] [--save] https://example.com');
+        console.error('  node no-global-connection-check.js [--dns 8.8.8.8] [--save] https://example.com');
         process.exit(1);
     }
 
     // 執行檢測
-    checkWebsiteResilience(url, { customDNS })
+    checkWebsiteResilience(url, { customDNS, save })
         .then(result => {
             console.log('檢測完成');
         })
