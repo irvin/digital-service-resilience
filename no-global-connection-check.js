@@ -351,8 +351,8 @@ async function checkWebsiteResilience(url, options = {}) {
             
             // 自動生成輸出檔名
             const urlObj = new URL(url);
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            const outputPath = path.resolve(`test_results/${urlObj.hostname}_${timestamp}.json`);
+            const filename = `${urlObj.hostname}${urlObj.pathname.replace(/\//g, '_')}`;
+            const outputPath = path.resolve(`test_results/${filename}.json`);
             
             // 儲存結果
             await fs.writeFile(outputPath, JSON.stringify(result, null, 2));
