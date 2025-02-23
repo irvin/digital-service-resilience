@@ -1,3 +1,4 @@
 [submodule "test_results"]
 	path = test_results
-	url = git@github.com:irvin/digital-service-resilience-test-result.git
+	url = https://github.com/irvin/digital-service-resilience.git
+	branch = main
