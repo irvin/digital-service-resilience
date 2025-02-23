@@ -10,6 +10,7 @@ const { chromium } = require('playwright');
 const axios = require('axios');
 // const { IPinfoWrapper } = require('node-ipinfo');
 const dns = require('dns').promises;
+const { Resolver } = require('dns').promises;
 
 // 建立 ipinfo client
 // const ipinfo = new IPinfoWrapper(process.env.IPINFO_TOKEN || undefined);
@@ -90,10 +91,14 @@ function cleanHARData(requests) {
     }, {});
 }
 
-async function getDomainIP(domain) {
+async function getDomainIP(domain, customDNS = null) {
     try {
-        const records = await dns.resolve4(domain);
-        return records[0]; // 返回第一個 IPv4 地址
+        if (customDNS) {
+            const resolver = new Resolver();
+            resolver.setServers([customDNS]);
+            return (await resolver.resolve4(domain))[0];
+        }
+        return (await dns.resolve4(domain))[0];
     } catch (error) {
         console.error(`無法解析域名 ${domain}:`, error.message);
         return null;
@@ -127,9 +132,9 @@ async function checkIPLocationWithSDK(domain) {
 }
 */
 
-async function checkIPLocationWithAPI(domain) {
+async function checkIPLocationWithAPI(domain, customDNS = null) {
     try {
-        const ip = await getDomainIP(domain);
+        const ip = await getDomainIP(domain, customDNS);
         if (!ip) {
             throw new Error(`無法獲取 ${domain} 的 IP 地址`);
         }
@@ -157,26 +162,8 @@ async function checkIPLocationWithAPI(domain) {
     }
 }
 
-async function checkIPLocation(domain) {
-    /*
-    const [sdkResult, apiResult] = await Promise.all([
-        checkIPLocationWithSDK(domain),
-        checkIPLocationWithAPI(domain)
-    ]);
-
-    // 比較兩種方式的結果
-    const isDifferent = JSON.stringify(sdkResult) !== JSON.stringify(apiResult);
-    if (isDifferent) {
-        console.log(`\n域名 ${domain} 的檢查結果比較：`);
-        console.log('SDK:', sdkResult);
-        console.log('API:', apiResult);
-    }
-    */
-
-    // 優先使用 SDK 的結果
-    // return sdkResult;
-
-    const apiResult = await checkIPLocationWithAPI(domain);    
+async function checkIPLocation(domain, customDNS = null) {
+    const apiResult = await checkIPLocationWithAPI(domain, customDNS);    
     return apiResult;
 }
 
@@ -217,9 +204,14 @@ function calculateResilience(ipInfoResults) {
     return scores;
 }
 
-async function checkWebsiteResilience(url) {
+async function checkWebsiteResilience(url, options = {}) {
     try {
         console.log(`開始檢測網站: ${url}`);
+        if (options.customDNS) {
+            console.log('使用自訂 DNS 伺服器:', options.customDNS);
+        } else {
+            console.log('使用本機 DNS 伺服器:', dns.getServers());
+        }
 
         // 1. 收集 HAR
         const requests = await collectHAR(url);
@@ -232,7 +224,7 @@ async function checkWebsiteResilience(url) {
 
         // 3. 檢查每個域名
         const locationResults = await Promise.all(
-            domains.map(domain => checkIPLocation(domain))
+            domains.map(domain => checkIPLocation(domain, options.customDNS))
         );
 
         // 4. 計算韌性分數
@@ -244,9 +236,12 @@ async function checkWebsiteResilience(url) {
         console.log(`境內服務 (O): ${resilience.domestic}`);
         console.log(`雲端服務 (-): ${resilience.cloud}`);
         console.log(`境外服務 (X): ${resilience.foreign}`);
+        
         console.log('\n詳細資訊:');
-        resilience.details.forEach(detail => {
-            console.log(`${detail.domain}: ${detail.score} (${detail.location}) [來源: ${detail.source}]`);
+        console.log('-------------------');
+        locationResults.forEach(result => {
+            console.log(`\n${result.domain}:`);
+            console.log(result);
         });
 
         return resilience;
@@ -256,20 +251,27 @@ async function checkWebsiteResilience(url) {
     }
 }
 
-
 // 如果直接執行此檔案（不是被 require）
 if (require.main === module) {
-    // 獲取命令列參數，跳過 npm 傳入的額外參數
-    const url = process.argv[process.argv.length - 1];
+    const args = process.argv.slice(2);
+    let url = args[args.length - 1];
+    let customDNS = null;
+
+    // 解析命令列參數
+    const dnsIndex = args.indexOf('--dns');
+    if (dnsIndex !== -1 && args[dnsIndex + 1]) {
+        customDNS = args[dnsIndex + 1];
+    }
 
     if (!url || url.startsWith('--')) {
         console.error('請提供要檢測的網址');
-        console.error('使用方式: npm check https://example.com');
+        console.error('  npm run check [--dns 8.8.8.8] https://example.com');
+        console.error('  node no-global-connection-check.js [--dns 8.8.8.8] https://example.com');
         process.exit(1);
     }
 
     // 執行檢測
-    checkWebsiteResilience(url)
+    checkWebsiteResilience(url, { customDNS })
         .then(result => {
             console.log('檢測完成');
         })
