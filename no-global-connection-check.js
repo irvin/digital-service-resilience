@@ -49,32 +49,74 @@ const CLOUD_PROVIDERS = [
     'AKAMAI'
 ];
 
+// 將網址轉換為對應的 JSON 檔名
+function urlToFilename(url) {
+    // 移除協議前綴（http:// 或 https://）
+    const urlObj = new URL('https://' + url.replace(/^https?:\/\//, ''));
+    let filename = `${urlObj.hostname}${urlObj.pathname.replace(/\//g, '_')}${
+        urlObj.search ? '_' + urlObj.search.replace(/[?&=]/g, '_') : ''
+    }`.replace(/_+$/, '');
+    
+    // 如果檔名太長，直接截斷到 95 字元
+    if (filename.length > 95) {
+        filename = filename.slice(0, 95);
+    }
+    
+    return filename + '.json';
+}
+
 async function collectHARAndCanonical(url) {
-    const browser = await chromium.launch();
+    const browser = await chromium.launch({
+        args: [
+            '--disable-blink-features=AutomationControlled',
+            '--disable-features=IsolateOrigins,site-per-process',
+            '--window-size=1920,1080'
+        ]
+    });
+    
     const context = await browser.newContext({
         bypassCSP: true,
-        ignoreHTTPSErrors: true
+        ignoreHTTPSErrors: true,
+        viewport: { width: 1920, height: 1080 },
+        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        deviceScaleFactor: 1,
+        hasTouch: false,
+        locale: 'zh-TW',
+        timezoneId: 'Asia/Taipei',
+        permissions: ['geolocation'],
+        geolocation: { latitude: 25.105497, longitude: 121.597366 },
     });
     
     const page = await context.newPage();
     
     try {
+        // 設定額外的 headers
+        await page.setExtraHTTPHeaders({
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"macOS"',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1'
+        });
+
         // 開始收集 HAR
         await context.tracing.start({ snapshots: true, screenshots: true });
         
         // 訪問頁面
-        await page.goto(url);
-        await page.waitForLoadState('networkidle');
+        await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+        
+        // 模擬人類行為
+        await simulateHumanBehavior(page);
         
         // 嘗試獲取 canonical URL
         const canonical = await page.evaluate((originalURL) => {
-            // 優先使用 canonical 標籤
             const canonicalLink = document.querySelector('link[rel="canonical"]');
-            if (canonicalLink) {
-                return canonicalLink.href;
-            }
-            // 如果沒有 canonical 標籤，使用原始 URL
-            return originalURL;
+            return canonicalLink ? canonicalLink.href : originalURL;
         }, url);
         
         // 獲取 connection 數據
@@ -88,6 +130,45 @@ async function collectHARAndCanonical(url) {
         return { requests, canonical };
     } finally {
         await browser.close();
+    }
+}
+
+// 模擬人類行為的輔助函數
+async function simulateHumanBehavior(page) {
+    // 隨機延遲函數
+    const randomDelay = () => new Promise(resolve => 
+        setTimeout(resolve, Math.floor(Math.random() * 1000) + 500)
+    );
+
+    try {
+        // 模擬滑鼠移動
+        await page.mouse.move(
+            Math.random() * 1000,
+            Math.random() * 800,
+            { steps: 10 }
+        );
+        await randomDelay();
+
+        // 模擬滾動
+        await page.evaluate(() => {
+            window.scrollTo({
+                top: Math.random() * document.body.scrollHeight,
+                behavior: 'smooth'
+            });
+        });
+        await randomDelay();
+
+        // 模擬更多滑鼠移動
+        for (let i = 0; i < 3; i++) {
+            await page.mouse.move(
+                Math.random() * 1000,
+                Math.random() * 800,
+                { steps: 5 }
+            );
+            await randomDelay();
+        }
+    } catch (error) {
+        console.warn('模擬人類行為時發生錯誤:', error.message);
     }
 }
 
@@ -276,19 +357,166 @@ function formatDomainDetail(result, cleanedData, resilience) {
     };
 }
 
+// 共用的檢測邏輯
+async function analyzeConnections(requests, options = {}) {
+    // 使用環境變數中的 DNS（如果有指定的話）
+    const envDNS = process.env.DEFAULT_DNS;
+    const customDNS = options.customDNS || envDNS;
+
+    // 取得測試環境資訊
+    const localIPInfo = await getLocalIPInfo(options);
+    if (!localIPInfo.error) {
+        console.log('\n測試環境資訊:');
+        console.log('-------------------');
+        console.log(localIPInfo);
+    }
+
+    if (customDNS) {
+        console.log('\n使用自訂 DNS 伺服器:', customDNS);
+    } else {
+        console.log('\n使用本機 DNS 伺服器:', dns.getServers());
+    }
+
+    // 2. 清理資料
+    const cleanedData = cleanHARData(requests);
+    const domains = Object.values(cleanedData).map(req => new URL(req.url).hostname);
+    console.log(`清理後剩餘 ${domains.length} 個唯一域名`);
+
+    // 3. 檢查每個域名
+    const locationResults = await Promise.all(
+        domains.map(domain => checkIPLocation(domain, customDNS))
+    );
+
+    // 4. 計算韌性分數
+    const resilience = calculateResilience(locationResults);
+
+    return {
+        localIPInfo,
+        cleanedData,
+        domains,
+        locationResults,
+        resilience,
+        customDNS
+    };
+}
+
+// 準備結果資料
+function prepareResult(analysis, metadata) {
+    return {
+        url: metadata.url,
+        canonicalURL: metadata.canonicalURL,
+        timestamp: new Date().toISOString(),
+        testingEnvironment: {
+            ip: analysis.localIPInfo.ip,
+            ...analysis.localIPInfo,
+            dnsServers: {
+                type: analysis.customDNS ? 'custom' : 'system',
+                servers: analysis.customDNS ? [analysis.customDNS] : dns.getServers()
+            }
+        },
+        requestCount: metadata.requestCount,
+        uniqueDomains: analysis.domains.length,
+        test_results: {
+            domestic: analysis.resilience.domestic,
+            cloud_w_domestic_node: analysis.resilience.cloud,
+            foreign: analysis.resilience.foreign
+        },
+        domainDetails: analysis.locationResults.map(result => 
+            formatDomainDetail(result, analysis.cleanedData, analysis.resilience)
+        )
+    };
+}
+
+// 儲存結果到檔案
+async function saveResult(result, options = {}) {
+    if (!options.save) return;
+
+    await fs.mkdir('test_results', { recursive: true });
+    const outputPath = path.resolve(`test_results/${urlToFilename(result.url)}`);
+    await fs.writeFile(outputPath, JSON.stringify(result, null, 2));
+    console.log(`\n結果已儲存至: ${outputPath}`);
+}
+
+// 處理檢測結果
+async function processResult(analysis, metadata, options = {}) {
+    // 準備結果資料
+    const result = prepareResult(analysis, metadata);
+
+    // 顯示結果摘要
+    console.log('\n檢測結果:');
+    console.log('-------------------');
+    console.log(`境內服務 (O): ${result.test_results.domestic}`);
+    console.log(`有國內節點的雲端服務 (?): ${result.test_results.cloud_w_domestic_node}`);
+    console.log(`境外服務 (X): ${result.test_results.foreign}`);
+
+    // 顯示詳細資訊
+    console.log('\n詳細資訊:');
+    console.log('-------------------');
+    analysis.locationResults.forEach(result => {
+        console.log(`\n${result.domain}:`);
+        console.log(formatDomainDetail(result, analysis.cleanedData, analysis.resilience));
+    });
+
+    // 儲存結果
+    await saveResult(result, options);
+    return result;
+}
+
+// 從 HAR 檔案讀取請求資訊
+async function checkWebsiteResilienceFromHAR(harFilePath, options = {}) {
+    try {
+        console.log(`開始從 HAR 檔案分析網站: ${harFilePath}`);
+        
+        const harContent = await fs.readFile(harFilePath, 'utf-8');
+        const harData = JSON.parse(harContent);
+        
+        // 從 HAR 檔案提取測試環境資訊
+        const testingEnvironment = {
+            timestamp: harData.log.pages?.[0]?.startedDateTime,
+            browser: harData.log.browser,
+            creator: harData.log.creator,
+            // 從第一個請求中取得 IP 資訊
+            serverIP: harData.log.entries[0]?.serverIPAddress,
+            // 如果有 _initiator 資訊也可以加入
+            initiator: harData.log.entries[0]?._initiator
+        };
+
+        console.log('\n測試環境資訊 (從 HAR 檔案):');
+        console.log('-------------------');
+        console.log(testingEnvironment);
+        
+        const mainUrl = harData.log.pages?.[0]?.title || 
+                       harData.log.entries[0]?.request.url;
+        
+        const requests = harData.log.entries.map(entry => ({
+            url: entry.request.url,
+            type: entry.request._resourceType || entry.response.content.mimeType
+        }));
+
+        console.log(`\n從 HAR 檔案中收集到 ${requests.length} 個請求`);
+
+        const analysis = await analyzeConnections(requests, options);
+        return processResult(analysis, {
+            url: mainUrl,
+            requestCount: requests.length,
+            testingEnvironment  // 加入測試環境資訊
+        }, options);
+    } catch (error) {
+        console.error('分析過程發生錯誤:', error);
+        throw error;
+    }
+}
+
+// 從網站直接收集資料
 async function checkWebsiteResilience(url, options = {}) {
     try {
-        // 保存原始輸入的 URL
         const inputURL = url;
-
-        // 確保 URL 有 protocol
         if (!url.startsWith('http://') && !url.startsWith('https://')) {
             url = 'https://' + url;
         }
 
         console.log(`開始檢測網站: ${url}`);
         
-        // 1. 收集 connections 和 canonical URL
         const { requests, canonical: canonicalURL } = await collectHARAndCanonical(url);
         
         if (canonicalURL !== url) {
@@ -297,100 +525,12 @@ async function checkWebsiteResilience(url, options = {}) {
 
         console.log(`收集到 ${requests.length} 個請求`);
 
-        // 使用環境變數中的 DNS（如果有指定的話）
-        const envDNS = process.env.DEFAULT_DNS;
-        const customDNS = options.customDNS || envDNS;
-
-        // 取得測試環境資訊
-        const localIPInfo = await getLocalIPInfo(options);
-        if (!localIPInfo.error) {
-            console.log('\n測試環境資訊:');
-            console.log('-------------------');
-            console.log(localIPInfo);
-        }
-
-        if (customDNS) {
-            console.log('\n使用自訂 DNS 伺服器:', customDNS);
-        } else {
-            console.log('\n使用本機 DNS 伺服器:', dns.getServers());
-        }
-
-        // 2. 清理資料
-        const cleanedData = cleanHARData(requests);
-        const domains = Object.values(cleanedData).map(req => new URL(req.url).hostname);
-        console.log(`清理後剩餘 ${domains.length} 個唯一域名`);
-
-        // 3. 檢查每個域名
-        const locationResults = await Promise.all(
-            domains.map(domain => checkIPLocation(domain, customDNS))
-        );
-
-        // 4. 計算韌性分數
-        const resilience = calculateResilience(locationResults);
-
-        // 5. 產生報告
-        console.log('\n檢測結果:');
-        console.log('-------------------');
-        console.log(`境內服務 (O): ${resilience.domestic}`);
-        console.log(`有國內節點的雲端服務 (?): ${resilience.cloud}`);
-        console.log(`境外服務 (X): ${resilience.foreign}`);
-        
-        console.log('\n詳細資訊:');
-        console.log('-------------------');
-        locationResults.forEach(result => {
-            console.log(`\n${result.domain}:`);
-            console.log(formatDomainDetail(result, cleanedData, resilience));
-        });
-
-        // 準備結果資料
-        const result = {
-            url: inputURL,           // 使用原始輸入的 URL
-            canonicalURL,            // 保存實際訪問的 URL
-            timestamp: new Date().toISOString(),
-            testingEnvironment: {
-                ip: localIPInfo.ip,
-                ...localIPInfo,
-                dnsServers: {
-                    type: customDNS ? 'custom' : 'system',
-                    servers: customDNS ? [customDNS] : dns.getServers()
-                }
-            },
-            requestCount: requests.length,
-            uniqueDomains: domains.length,
-            test_results: {
-                domestic: resilience.domestic,
-                cloud_w_domestic_node: resilience.cloud,
-                foreign: resilience.foreign
-            },
-            domainDetails: locationResults.map(result => 
-                formatDomainDetail(result, cleanedData, resilience)
-            )
-        };
-
-        // 如果指定要儲存結果
-        if (options.save) {
-            // 確保目錄存在
-            await fs.mkdir('test_results', { recursive: true });
-            
-            // 自動生成輸出檔名 - 使用 canonical URL
-            const urlObj = new URL(canonicalURL);
-            let filename = `${urlObj.hostname}${urlObj.pathname.replace(/\//g, '_')}${
-                urlObj.search ? '_' + urlObj.search.replace(/[?&=]/g, '_') : ''
-            }`.replace(/_+$/, '');
-            
-            // 如果檔名太長，直接截斷到 95 字元
-            if (filename.length > 95) {
-                filename = filename.slice(0, 95);
-            }
-            
-            const outputPath = path.resolve(`test_results/${filename}.json`);
-            
-            // 儲存結果
-            await fs.writeFile(outputPath, JSON.stringify(result, null, 2));
-            console.log(`\n結果已儲存至: ${outputPath}`);
-        }
-
-        return result;
+        const analysis = await analyzeConnections(requests, options);
+        return processResult(analysis, {
+            url: inputURL,
+            canonicalURL,
+            requestCount: requests.length
+        }, options);
     } catch (error) {
         console.error('檢測過程發生錯誤:', error);
         throw error;
@@ -404,11 +544,7 @@ if (require.main === module) {
     let customDNS = null;
     let save = false;
     let token = null;
-
-    // 確保 URL 有 protocol
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        url = 'https://' + url;
-    }
+    let harFile = null;
 
     // 解析命令列參數
     const dnsIndex = args.indexOf('--dns');
@@ -421,22 +557,36 @@ if (require.main === module) {
         token = args[tokenIndex + 1];
     }
 
-    // 檢查是否要儲存結果
+    const harIndex = args.indexOf('--har');
+    if (harIndex !== -1 && args[harIndex + 1]) {
+        harFile = args[harIndex + 1];
+        url = null;
+    }
+
     save = args.includes('--save');
 
-    if (!url || url.startsWith('--')) {
-        console.error('請提供要檢測的網址');
+    // 檢查輸入參數的有效性
+    if (harFile && !harFile.endsWith('.har')) {
+        console.error('HAR 檔案必須是 .har 格式');
+        process.exit(1);
+    }
+    
+    if (!harFile && !url) {
+        console.error('請提供要檢測的網址或 HAR 檔案');
         console.error('使用方式:');
-        console.error('  npm run check [--dns 8.8.8.8] [--save] https://example.com');
         console.error('  npm run check [--dns 8.8.8.8] [--ipinfo-token your-token] [--save] https://example.com');
+        console.error('  npm run check [--dns 8.8.8.8] [--save] --har path/to/file.har');
         process.exit(1);
     }
 
     // 執行檢測
-    checkWebsiteResilience(url, { customDNS, token, save })
-        .then(result => {
-            console.log('檢測完成');
-        })
+    const options = { customDNS, token, save };
+    const promise = harFile 
+        ? checkWebsiteResilienceFromHAR(harFile, options)
+        : checkWebsiteResilience(url, options);
+
+    promise
+        .then(() => console.log('檢測完成'))
         .catch(error => {
             console.error('檢測失敗:', error);
             process.exit(1);
@@ -444,5 +594,6 @@ if (require.main === module) {
 }
 
 module.exports = {
-    checkWebsiteResilience
+    checkWebsiteResilience,
+    checkWebsiteResilienceFromHAR
 }; 
