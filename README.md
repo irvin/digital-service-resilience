@@ -47,7 +47,7 @@
 | 國防部 | ？ | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=www.mnd.gov.tw)
 | 總統府 | Ｏ | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=www.president.gov.tw)
 | 內政部警政署防空避難專區 | Ｏ | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=adr.npa.gov.tw)
-| g0v | Ｘ | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=g0v.tw)
+| G0v | Ｘ | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=g0v.tw)
 | OCF | Ｘ | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=ocf.tw)
 | SITCON | Ｘ | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=sitcon.org)
 
