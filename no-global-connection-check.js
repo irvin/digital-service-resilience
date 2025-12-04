@@ -646,6 +646,17 @@ class CloudflareChallengeError extends Error {
 }
 
 /**
+ * 零請求錯誤類別
+ */
+class ZeroRequestError extends Error {
+    constructor(result) {
+        super('No domains after filtering');
+        this.name = 'ZeroRequestError';
+        this.result = result;
+    }
+}
+
+/**
  * 檢測是否遇到 Cloudflare challenge
  * @param {Array} domainDetails - 域名詳細資訊陣列
  * @returns {Object|null} 如果檢測到 Cloudflare challenge 則返回錯誤資訊，否則返回 null
@@ -796,6 +807,38 @@ async function checkWebsiteResilience(url, options = {}) {
         const domains = Object.values(cleanedData).map(req => new URL(req.url).hostname);
         console.log(`清理後剩餘 ${domains.length} 個唯一域名`);
 
+        // 檢查是否為零域名（篩選後沒有剩餘域名）
+        if (domains.length === 0) {
+            // 建立錯誤結果物件
+            const errorResult = {
+                url: inputURL,
+                canonicalURL: canonicalURL || url,
+                timestamp: new Date().toISOString(),
+                testParameters: {
+                    customDNS: customDNS || null,
+                    useAdblock: options.useAdblock !== false,
+                    adblockUrls: options.adblockUrls || [],
+                    useCache: options.useCache !== false,
+                    hasIPinfoToken: !!(options.token || process.env.IPINFO_TOKEN)
+                },
+                testingEnvironment: {
+                    ip: localIPInfo.ip,
+                    ...localIPInfo,
+                    dnsServer: customDNS || (dns.getServers().length > 0 ? dns.getServers()[0] : null)
+                },
+                requestCount: requests.length,
+                uniqueDomains: 0,
+                testError: true,
+                errorReason: 'No domains after filtering',
+                errorDetails: {
+                    message: '所有域名都被 adblock 清單過濾掉了',
+                    totalRequests: requests.length,
+                    filteredDomains: 0
+                }
+            };
+            throw new ZeroRequestError(errorResult);
+        }
+
         // Debug: 顯示清理後的域名列表
         if (options.debug) {
             console.log('\n[DEBUG] 清理後的域名列表:');
@@ -933,9 +976,9 @@ async function checkWebsiteResilience(url, options = {}) {
 
         return result;
     } catch (error) {
-        // 如果是 Cloudflare Challenge 錯誤，寫入錯誤資訊到 JSON
-        if (error instanceof CloudflareChallengeError) {
-            console.error('檢測到 Cloudflare Challenge:', error.message);
+        // 如果是有 errorReason 的測試錯誤（Cloudflare Challenge 或零域名等），寫入錯誤資訊到 JSON
+        if ((error instanceof CloudflareChallengeError || error instanceof ZeroRequestError) && error.result) {
+            console.error(`檢測到測試錯誤: ${error.result.errorReason || error.message}`);
 
             if (options.save) {
                 try {
