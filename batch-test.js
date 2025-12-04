@@ -198,7 +198,12 @@ async function batchTest(options = {}) {
     // 儲存總結報告
     if (save) {
         const timestamp = Date.now();
-        const summaryPath = `batch_summary_${timestamp}.json`;
+
+        // 確保 test_results/_logs 目錄存在
+        const logsDir = path.join('test_results', '_logs');
+        await fs.mkdir(logsDir, { recursive: true });
+
+        const summaryPath = path.join(logsDir, `batch_summary_${timestamp}.json`);
         const summary = {
             timestamp: new Date().toISOString(),
             options: {
@@ -228,7 +233,7 @@ async function batchTest(options = {}) {
 
         // 如果有錯誤網站，輸出獨立的錯誤網站清單
         if (stats.errorSites.length > 0) {
-            const errorListPath = `batch_errors_${timestamp}.json`;
+            const errorListPath = path.join(logsDir, `batch_errors_${timestamp}.json`);
             const errorList = {
                 timestamp: new Date().toISOString(),
                 totalErrors: stats.errorSites.length,

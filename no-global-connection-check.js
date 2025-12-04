@@ -1073,8 +1073,9 @@ async function checkWebsiteResilience(url, options = {}) {
         // 儲存錯誤結果到 JSON 檔案
         if (options.save) {
             try {
-                // 確保目錄存在
-                await fs.mkdir('test_results', { recursive: true });
+                // 確保 test_results/_error 目錄存在
+                const errorDir = path.join('test_results', '_error');
+                await fs.mkdir(errorDir, { recursive: true });
 
                 // 從錯誤結果中取得 URL 資訊
                 const urlToUse = errorResult.canonicalURL || errorResult.url;
@@ -1088,7 +1089,7 @@ async function checkWebsiteResilience(url, options = {}) {
                     filename = filename.slice(0, 95);
                 }
 
-                const outputPath = path.resolve(`test_results/${filename}.error.json`);
+                const outputPath = path.resolve(path.join(errorDir, `${filename}.error.json`));
 
                 // 儲存包含錯誤資訊的結果
                 await fs.writeFile(outputPath, JSON.stringify(errorResult, null, 2));
