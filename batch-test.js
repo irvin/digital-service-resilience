@@ -279,7 +279,7 @@ if (require.main === module) {
 
     // 解析 --concurrency
     const concurrencyIndex = args.indexOf('--concurrency');
-    if (concurrencyIndex !== -1 && args.concurrencyIndex + 1) {
+    if (concurrencyIndex !== -1 && args[concurrencyIndex + 1]) {
         concurrency = parseInt(args[concurrencyIndex + 1], 10);
     }
 
