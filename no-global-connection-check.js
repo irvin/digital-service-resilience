@@ -286,8 +286,12 @@ async function initializeIgnorableDomains(options = {}) {
 
 async function collectHARAndCanonical(url, options = {}) {
     const timeout = options.timeout || 120000; // 預設 120 秒
+    const debug = options.debug || false;
 
     const browser = await chromium.launch();
+    // const browser = await chromium.launch({
+    //     headless: !debug // debug 模式下顯示瀏覽器視窗
+    // });
     const context = await browser.newContext({
         bypassCSP: true,
         ignoreHTTPSErrors: true
@@ -295,15 +299,68 @@ async function collectHARAndCanonical(url, options = {}) {
 
     const page = await context.newPage();
 
+    // 如果啟用 debug，監聽各種事件
+    if (debug) {
+        console.log(`[DEBUG] 開始載入頁面: ${url}`);
+
+        // 監聽請求
+        page.on('request', request => {
+            console.log(`[DEBUG] → 請求: ${request.method()} ${request.url()}`);
+        });
+
+        // 監聽回應
+        page.on('response', response => {
+            const status = response.status();
+            const statusText = status >= 400 ? '❌' : '✓';
+            console.log(`[DEBUG] ${statusText} 回應: ${status} ${response.url()}`);
+        });
+
+        // 監聽請求失敗
+        page.on('requestfailed', request => {
+            console.log(`[DEBUG] ✗ 請求失敗: ${request.method()} ${request.url()} - ${request.failure()?.errorText || 'Unknown'}`);
+        });
+
+        // 監聽載入狀態變化
+        page.on('load', () => {
+            console.log(`[DEBUG] ✓ 頁面載入完成 (load)`);
+        });
+
+        page.on('domcontentloaded', () => {
+            console.log(`[DEBUG] ✓ DOM 內容載入完成 (domcontentloaded)`);
+        });
+
+        // 監聽 console 訊息
+        page.on('console', msg => {
+            const type = msg.type();
+            const text = msg.text();
+            if (type === 'error' || type === 'warning') {
+                console.log(`[DEBUG] Console ${type}: ${text}`);
+            }
+        });
+
+        // 監聽頁面錯誤
+        page.on('pageerror', error => {
+            console.log(`[DEBUG] ✗ 頁面錯誤: ${error.message}`);
+        });
+    }
+
     try {
         // 開始收集 HAR
         await context.tracing.start({ snapshots: true, screenshots: true });
+
+        if (debug) {
+            console.log(`[DEBUG] 正在導航到: ${url}`);
+        }
 
         // 訪問頁面並檢查響應狀態碼
         const response = await page.goto(url, {
             waitUntil: 'domcontentloaded',
             timeout: timeout
         });
+
+        if (debug) {
+            console.log(`[DEBUG] ✓ 導航完成，狀態碼: ${response ? response.status() : 'N/A'}`);
+        }
 
         // 取得 HTTP 狀態碼
         const httpStatus = response ? response.status() : null;
@@ -314,7 +371,15 @@ async function collectHARAndCanonical(url, options = {}) {
             throw new Error(`HTTP ${httpStatus} ${statusText}`);
         }
 
+        if (debug) {
+            console.log(`[DEBUG] 等待頁面載入狀態: load`);
+        }
+
         await page.waitForLoadState('load', { timeout: timeout });
+
+        if (debug) {
+            console.log(`[DEBUG] ✓ 頁面載入狀態: load 完成`);
+        }
 
         // 嘗試獲取 canonical URL
         const canonical = await page.evaluate((originalURL) => {
@@ -327,6 +392,10 @@ async function collectHARAndCanonical(url, options = {}) {
             return originalURL;
         }, url);
 
+        if (debug) {
+            console.log(`[DEBUG] Canonical URL: ${canonical}`);
+        }
+
         // 獲取 connection 數據
         const requests = await page.evaluate(() => {
             return performance.getEntriesByType('resource').map(entry => ({
@@ -335,9 +404,16 @@ async function collectHARAndCanonical(url, options = {}) {
             }));
         });
 
+        if (debug) {
+            console.log(`[DEBUG] 收集到 ${requests.length} 個資源請求`);
+        }
+
         return { requests, canonical, httpStatus };
     } finally {
         await browser.close();
+        if (debug) {
+            console.log(`[DEBUG] 瀏覽器已關閉`);
+        }
     }
 }
 
@@ -819,7 +895,8 @@ async function checkWebsiteResilience(url, options = {}) {
 
         try {
             harResult = await collectHARAndCanonical(url, {
-                timeout: options.timeout || 120000
+                timeout: options.timeout || 120000,
+                debug: options.debug
             });
         } catch (error) {
             // 檢查是否為 DNS/網路錯誤，且原始 URL 沒有 www. 前綴
@@ -848,7 +925,8 @@ async function checkWebsiteResilience(url, options = {}) {
                     retriedWithWww = true;
 
                     harResult = await collectHARAndCanonical(wwwUrl, {
-                        timeout: options.timeout || 120000
+                        timeout: options.timeout || 120000,
+                        debug: options.debug
                     });
                     // 如果成功，更新 url 和 inputURL
                     url = wwwUrl;
