@@ -813,8 +813,8 @@ async function checkWebsiteResilience(url, options = {}) {
 
         // 取得測試環境資訊
         localIPInfo = await getLocalIPInfo(options);
-        if (!localIPInfo.error) {
-            console.log('\n測試環境資訊:');
+        if (options.debug && !localIPInfo.error) {
+            console.log('\n[DEBUG] 測試環境資訊:');
             console.log('-------------------');
             console.log(localIPInfo);
         }
@@ -933,12 +933,14 @@ async function checkWebsiteResilience(url, options = {}) {
         console.log(`有國內節點的雲端服務 (?): ${resilience.cloud}`);
         console.log(`境外服務 (X): ${resilience.foreign}`);
 
-        console.log('\n詳細資訊:');
-        console.log('-------------------');
-        locationResults.forEach(result => {
-            console.log(`\n${result.domain}:`);
-            console.log(formatDomainDetail(result, cleanedData, resilience));
-        });
+        if (options.debug) {
+            console.log('\n[DEBUG] 詳細域名資訊:');
+            console.log('-------------------');
+            locationResults.forEach(result => {
+                console.log(`\n${result.domain}:`);
+                console.log(formatDomainDetail(result, cleanedData, resilience));
+            });
+        }
 
         // 準備結果資料
         const result = {
