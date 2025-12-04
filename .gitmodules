@@ -2,3 +2,6 @@
 	path = test_results
 	url = https://github.com/irvin/web-resilience-test-result.git
 	branch = main
+[submodule "top-traffic-list-taiwan"]
+	path = top-traffic-list-taiwan
+	url = git@github.com:irvin/top-traffic-list-taiwan.git
