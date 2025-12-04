@@ -899,15 +899,17 @@ async function checkWebsiteResilience(url, options = {}) {
                 debug: options.debug
             });
         } catch (error) {
-            // 檢查是否為 DNS/網路錯誤，且原始 URL 沒有 www. 前綴
+            // 檢查是否為 DNS/網路錯誤或 HTTP 404 錯誤
             const isDnsError = error.message && (error.message.includes('ERR_NAME_NOT_RESOLVED'));
+            const isHttp404 = error.message && /^HTTP 404/.test(error.message);
 
             // 檢查原始 URL 是否沒有 www. 前綴
             let shouldRetryWithWww = false;
             try {
                 const urlObj = new URL(url);
                 const hostname = urlObj.hostname;
-                if (!hostname.startsWith('www.') && isDnsError) {
+                // 如果是 DNS 錯誤或 HTTP 404，且沒有 www 前綴，則重試
+                if (!hostname.startsWith('www.') && (isDnsError || isHttp404)) {
                     shouldRetryWithWww = true;
                 }
             } catch {
@@ -921,7 +923,8 @@ async function checkWebsiteResilience(url, options = {}) {
                     urlObj.hostname = 'www.' + urlObj.hostname;
                     const wwwUrl = urlObj.toString();
 
-                    console.log(`DNS 解析失敗，嘗試使用 www. 版本: ${wwwUrl}`);
+                    const errorType = isDnsError ? 'DNS 解析失敗' : 'HTTP 404 錯誤';
+                    console.log(`${errorType}，嘗試使用 www. 版本: ${wwwUrl}`);
                     retriedWithWww = true;
 
                     harResult = await collectHARAndCanonical(wwwUrl, {
