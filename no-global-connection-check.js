@@ -14,21 +14,14 @@ const dns = require('dns').promises;
 const { Resolver } = require('dns').promises;
 const fs = require('fs').promises;
 const path = require('path');
+const crypto = require('crypto');
 
 // 建立 ipinfo client
 // const ipinfo = new IPinfoWrapper(process.env.IPINFO_TOKEN || undefined);
 
 // 可忽略的域名列表（手動維護的）
 const MANUAL_IGNORABLE_DOMAINS = [
-    'analytics.google.com',
-    'www.google-analytics.com',
-    'connect.facebook.net',
-    'fonts.gstatic.com',
-    'www.facebook.com',
-    'www.youtube.com',
-    'doubleclick.net',
-    'www.google.com.tw/ads',
-    'jscdn.appier.net'
+    'fonts.gstatic.com'
 ];
 
 // 台灣 ASN 列表 - 暫時不使用
@@ -96,11 +89,90 @@ function parseAdblockRules(rulesText) {
 }
 
 /**
- * 從線上載入 adblock 清單
+ * 取得 URL 的快取檔名（使用 hash）
+ * @param {string} url - URL
+ * @returns {string} 快取檔名
+ */
+function getCacheFileName(url) {
+    const hash = crypto.createHash('md5').update(url).digest('hex');
+    return `${hash}.json`;
+}
+
+/**
+ * 取得快取檔案路徑
+ * @param {string} url - URL
+ * @returns {string} 快取檔案路徑
+ */
+function getCacheFilePath(url) {
+    const cacheDir = path.join(__dirname, '.cache', 'adblock');
+    const fileName = getCacheFileName(url);
+    return path.join(cacheDir, fileName);
+}
+
+/**
+ * 檢查快取是否有效（預設 24 小時）
+ * @param {string} cachePath - 快取檔案路徑
+ * @param {number} maxAge - 最大年齡（毫秒），預設 24 小時
+ * @returns {Promise<boolean>} 如果快取有效則返回 true
+ */
+async function isCacheValid(cachePath, maxAge = 24 * 60 * 60 * 1000) {
+    try {
+        const stats = await fs.stat(cachePath);
+        const age = Date.now() - stats.mtime.getTime();
+        return age < maxAge;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * 讀取快取
+ * @param {string} cachePath - 快取檔案路徑
+ * @returns {Promise<string|null>} 快取內容，如果不存在則返回 null
+ */
+async function readCache(cachePath) {
+    try {
+        const data = await fs.readFile(cachePath, 'utf-8');
+        const cache = JSON.parse(data);
+        return cache.content;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * 寫入快取
+ * @param {string} cachePath - 快取檔案路徑
+ * @param {string} content - 要快取的內容
+ */
+async function writeCache(cachePath, content) {
+    try {
+        // 確保快取目錄存在
+        const cacheDir = path.dirname(cachePath);
+        await fs.mkdir(cacheDir, { recursive: true });
+
+        const cacheData = {
+            content,
+            timestamp: new Date().toISOString(),
+            cachedAt: Date.now()
+        };
+
+        await fs.writeFile(cachePath, JSON.stringify(cacheData, null, 2), 'utf-8');
+    } catch (error) {
+        console.warn(`無法寫入快取 ${cachePath}: ${error.message}`);
+    }
+}
+
+/**
+ * 從線上載入 adblock 清單（支援快取）
  * @param {Array<string>} listUrls - adblock 清單的 URL 陣列
+ * @param {Object} options - 選項
+ * @param {boolean} options.useCache - 是否使用快取（預設 true）
+ * @param {number} options.cacheMaxAge - 快取最大年齡（毫秒），預設 24 小時
  * @returns {Promise<Set<string>>} 解析後的域名集合
  */
-async function loadAdblockLists(listUrls = []) {
+async function loadAdblockLists(listUrls = [], options = {}) {
+    const { useCache = true, cacheMaxAge = 24 * 60 * 60 * 1000 } = options;
     const defaultLists = [
         'https://easylist.to/easylist/easylist.txt',
         'https://easylist.to/easylist/easyprivacy.txt'
@@ -111,7 +183,28 @@ async function loadAdblockLists(listUrls = []) {
 
     for (const url of urls) {
         try {
-            console.log(`正在載入 adblock 清單: ${url}`);
+            const cachePath = getCacheFilePath(url);
+            let content = null;
+
+            // 嘗試讀取快取
+            if (useCache) {
+                const isValid = await isCacheValid(cachePath, cacheMaxAge);
+                if (isValid) {
+                    content = await readCache(cachePath);
+                    if (content) {
+                        console.log(`使用快取載入 adblock 清單: ${url}`);
+                        const domains = parseAdblockRules(content);
+                        for (const domain of domains) {
+                            allDomains.add(domain);
+                        }
+                        console.log(`  已載入 ${domains.size} 個域名規則（來自快取）`);
+                        continue;
+                    }
+                }
+            }
+
+            // 快取無效或不存在，從網路下載
+            console.log(`正在下載 adblock 清單: ${url}`);
             const response = await axios.get(url, {
                 timeout: 10000,
                 headers: {
@@ -119,13 +212,34 @@ async function loadAdblockLists(listUrls = []) {
                 }
             });
 
-            const domains = parseAdblockRules(response.data);
+            content = response.data;
+
+            // 儲存到快取
+            if (useCache) {
+                await writeCache(cachePath, content);
+            }
+
+            const domains = parseAdblockRules(content);
             for (const domain of domains) {
                 allDomains.add(domain);
             }
             console.log(`  已載入 ${domains.size} 個域名規則`);
         } catch (error) {
             console.warn(`無法載入清單 ${url}: ${error.message}`);
+
+            // 如果下載失敗，嘗試使用舊的快取（即使已過期）
+            if (useCache) {
+                const cachePath = getCacheFilePath(url);
+                const content = await readCache(cachePath);
+                if (content) {
+                    console.log(`  嘗試使用過期快取...`);
+                    const domains = parseAdblockRules(content);
+                    for (const domain of domains) {
+                        allDomains.add(domain);
+                    }
+                    console.log(`  已載入 ${domains.size} 個域名規則（來自過期快取）`);
+                }
+            }
         }
     }
 
@@ -137,16 +251,23 @@ async function loadAdblockLists(listUrls = []) {
  * @param {Object} options - 選項
  * @param {Array<string>} options.adblockUrls - 自訂 adblock 清單 URL
  * @param {boolean} options.useAdblock - 是否使用 adblock 清單（預設 true）
+ * @param {boolean} options.useCache - 是否使用快取（預設 true）
+ * @param {number} options.cacheMaxAge - 快取最大年齡（毫秒），預設 24 小時
  */
 async function initializeIgnorableDomains(options = {}) {
-    const { adblockUrls = [], useAdblock = true } = options;
+    const {
+        adblockUrls = [],
+        useAdblock = true,
+        useCache = true,
+        cacheMaxAge = 24 * 60 * 60 * 1000
+    } = options;
 
     // 重置為手動維護的清單
     IGNORABLE_DOMAINS = [...MANUAL_IGNORABLE_DOMAINS];
 
     if (useAdblock) {
         try {
-            ADBLOCK_DOMAINS = await loadAdblockLists(adblockUrls);
+            ADBLOCK_DOMAINS = await loadAdblockLists(adblockUrls, { useCache, cacheMaxAge });
             // 將 adblock 域名加入可忽略列表
             IGNORABLE_DOMAINS.push(...Array.from(ADBLOCK_DOMAINS));
             console.log(`已載入 ${ADBLOCK_DOMAINS.size} 個 adblock 域名規則`);
@@ -199,11 +320,38 @@ async function collectHARAndCanonical(url) {
 }
 
 /**
+ * 檢查兩個域名是否相關（一個是另一個的子域名或相同）
+ * @param {string} hostname1 - 第一個域名
+ * @param {string} hostname2 - 第二個域名
+ * @returns {boolean} 如果相關則返回 true
+ */
+function isRelatedDomain(hostname1, hostname2) {
+    if (hostname1 === hostname2) {
+        return true;
+    }
+    // 檢查 hostname1 是否是 hostname2 的子域名
+    if (hostname1.endsWith('.' + hostname2)) {
+        return true;
+    }
+    // 檢查 hostname2 是否是 hostname1 的子域名
+    if (hostname2.endsWith('.' + hostname1)) {
+        return true;
+    }
+    return false;
+}
+
+/**
  * 檢查域名是否應該被忽略
  * @param {string} hostname - 要檢查的主機名
+ * @param {string|null} targetHostname - 目標網址的主機名，如果是目標網址本身或其子域名則不忽略
  * @returns {boolean} 如果應該被忽略則返回 true
  */
-function shouldIgnoreDomain(hostname) {
+function shouldIgnoreDomain(hostname, targetHostname = null) {
+    // 如果是目標網址本身或其相關域名（子域名），則不忽略
+    if (targetHostname && isRelatedDomain(hostname, targetHostname)) {
+        return false;
+    }
+
     // 使用 Set 進行快速查找
     if (ADBLOCK_DOMAINS.has(hostname)) {
         return true;
@@ -214,19 +362,67 @@ function shouldIgnoreDomain(hostname) {
     for (let i = 0; i < hostnameParts.length; i++) {
         const domain = hostnameParts.slice(i).join('.');
         if (ADBLOCK_DOMAINS.has(domain)) {
+            // 如果匹配的域名是目標網址或其相關域名，則不忽略
+            if (targetHostname && isRelatedDomain(domain, targetHostname)) {
+                return false;
+            }
             return true;
         }
     }
 
     // 檢查手動維護的清單（使用 includes 以支援部分匹配）
-    return MANUAL_IGNORABLE_DOMAINS.some(domain => hostname.includes(domain));
+    const matchedManualDomain = MANUAL_IGNORABLE_DOMAINS.find(domain => hostname.includes(domain));
+    if (matchedManualDomain) {
+        return true;
+    }
+
+    return false;
 }
 
-function cleanHARData(requests) {
+/**
+ * 獲取域名被忽略的原因
+ * @param {string} hostname - 要檢查的主機名
+ * @param {string|null} targetHostname - 目標網址的主機名
+ * @returns {string|null} 忽略原因，如果沒有被忽略則返回 null
+ */
+function getIgnoreReason(hostname, targetHostname = null) {
+    // 如果是目標網址本身或其相關域名，則不忽略
+    if (targetHostname && isRelatedDomain(hostname, targetHostname)) {
+        return null;
+    }
+
+    // 檢查是否在 adblock 清單中（完全匹配）
+    if (ADBLOCK_DOMAINS.has(hostname)) {
+        return `Adblock 清單（完全匹配）`;
+    }
+
+    // 檢查子域名匹配
+    const hostnameParts = hostname.split('.');
+    for (let i = 0; i < hostnameParts.length; i++) {
+        const domain = hostnameParts.slice(i).join('.');
+        if (ADBLOCK_DOMAINS.has(domain)) {
+            // 如果匹配的域名是目標網址或其相關域名，則不忽略
+            if (targetHostname && isRelatedDomain(domain, targetHostname)) {
+                return null;
+            }
+            return `Adblock 清單（子域名匹配: ${domain}）`;
+        }
+    }
+
+    // 檢查手動維護的清單
+    const matchedManualDomain = MANUAL_IGNORABLE_DOMAINS.find(domain => hostname.includes(domain));
+    if (matchedManualDomain) {
+        return `手動維護清單（匹配: ${matchedManualDomain}）`;
+    }
+
+    return null;
+}
+
+function cleanHARData(requests, targetHostname = null) {
     return requests.filter(request => {
         try {
             const url = new URL(request.url);
-            return !shouldIgnoreDomain(url.hostname);
+            return !shouldIgnoreDomain(url.hostname, targetHostname);
         } catch {
             return false;
         }
@@ -411,10 +607,18 @@ async function checkWebsiteResilience(url, options = {}) {
     try {
         // 初始化可忽略的域名列表（如果尚未初始化）
         if (ADBLOCK_DOMAINS.size === 0 && options.useAdblock !== false) {
+            if (options.debug) {
+                console.log('[DEBUG] 正在載入 adblock 清單...');
+            }
             await initializeIgnorableDomains({
                 adblockUrls: options.adblockUrls,
-                useAdblock: options.useAdblock !== false
+                useAdblock: options.useAdblock !== false,
+                useCache: options.useCache !== false,
+                cacheMaxAge: options.cacheMaxAge
             });
+            if (options.debug) {
+                console.log(`[DEBUG] 已載入 ${ADBLOCK_DOMAINS.size} 個 adblock 域名規則`);
+            }
         }
 
         // 保存原始輸入的 URL
@@ -436,6 +640,15 @@ async function checkWebsiteResilience(url, options = {}) {
 
         console.log(`收集到 ${requests.length} 個請求`);
 
+        // Debug: 顯示所有請求
+        if (options.debug) {
+            console.log('\n[DEBUG] 所有請求列表:');
+            console.log('-------------------');
+            requests.forEach((req, idx) => {
+                console.log(`[${idx + 1}] ${req.url} (${req.type})`);
+            });
+        }
+
         // 使用環境變數中的 DNS（如果有指定的話）
         const envDNS = process.env.DEFAULT_DNS;
         const customDNS = options.customDNS || envDNS;
@@ -454,14 +667,66 @@ async function checkWebsiteResilience(url, options = {}) {
             console.log('\n使用本機 DNS 伺服器:', dns.getServers());
         }
 
+        // 取得目標網址的主機名（用於判斷是否為目標網址本身）
+        const targetURL = new URL(canonicalURL || url);
+        const targetHostname = targetURL.hostname;
+
         // 2. 清理資料
-        const cleanedData = cleanHARData(requests);
+        const cleanedData = cleanHARData(requests, targetHostname);
         const domains = Object.values(cleanedData).map(req => new URL(req.url).hostname);
         console.log(`清理後剩餘 ${domains.length} 個唯一域名`);
 
+        // Debug: 顯示清理後的域名列表
+        if (options.debug) {
+            console.log('\n[DEBUG] 清理後的域名列表:');
+            console.log('-------------------');
+            domains.forEach((domain, idx) => {
+                console.log(`[${idx + 1}] ${domain}`);
+            });
+
+            // 顯示被忽略的域名及其原因
+            const ignoredDomainsWithReasons = requests
+                .map(req => {
+                    try {
+                        const hostname = new URL(req.url).hostname;
+                        const reason = getIgnoreReason(hostname, targetHostname);
+                        return reason ? { hostname, reason } : null;
+                    } catch {
+                        return null;
+                    }
+                })
+                .filter(item => item !== null)
+                .filter((item, idx, self) => {
+                    // 去重，只保留第一次出現的
+                    return self.findIndex(x => x.hostname === item.hostname) === idx;
+                })
+                .filter(item => !domains.includes(item.hostname)); // 確保不在清理後的域名列表中
+
+            if (ignoredDomainsWithReasons.length > 0) {
+                console.log('\n[DEBUG] 被忽略的域名:');
+                console.log('-------------------');
+                ignoredDomainsWithReasons.forEach((item, idx) => {
+                    console.log(`[${idx + 1}] ${item.hostname}`);
+                    console.log(`     原因: ${item.reason}`);
+                });
+            }
+        }
+
         // 3. 檢查每個域名
+        if (options.debug) {
+            console.log('\n[DEBUG] 開始檢查域名 IP 位置...');
+        }
         const locationResults = await Promise.all(
-            domains.map(domain => checkIPLocation(domain, customDNS))
+            domains.map(async (domain) => {
+                if (options.debug) {
+                    console.log(`[DEBUG] 檢查 ${domain}...`);
+                }
+                const result = await checkIPLocation(domain, customDNS);
+                if (options.debug) {
+                    console.log(`[DEBUG] ${domain}: ${result.ip || 'N/A'} (${result.country || 'N/A'})`);
+                }
+                return result;
+            })
         );
 
         // 4. 計算韌性分數
@@ -545,6 +810,9 @@ if (require.main === module) {
     let token = null;
     let useAdblock = true;
     let adblockUrls = [];
+    let debug = false;
+    let useCache = true;
+    let cacheMaxAge = 24 * 60 * 60 * 1000; // 預設 24 小時
 
     // 確保 URL 有 protocol
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
@@ -565,6 +833,9 @@ if (require.main === module) {
     // 檢查是否要儲存結果
     save = args.includes('--save');
 
+    // 檢查是否要開啟 debug 模式
+    debug = args.includes('--debug');
+
     // 檢查是否要使用 adblock 清單
     if (args.includes('--no-adblock')) {
         useAdblock = false;
@@ -580,6 +851,24 @@ if (require.main === module) {
         }
     }
 
+    // 解析快取選項
+    if (args.includes('--no-cache')) {
+        useCache = false;
+    }
+
+    const cacheMaxAgeIndex = args.indexOf('--cache-max-age');
+    if (cacheMaxAgeIndex !== -1 && args[cacheMaxAgeIndex + 1]) {
+        // 支援格式：數字（小時）或數字+h（小時）、數字+m（分鐘）
+        const ageArg = args[cacheMaxAgeIndex + 1];
+        if (ageArg.endsWith('h')) {
+            cacheMaxAge = parseInt(ageArg.slice(0, -1), 10) * 60 * 60 * 1000;
+        } else if (ageArg.endsWith('m')) {
+            cacheMaxAge = parseInt(ageArg.slice(0, -1), 10) * 60 * 1000;
+        } else {
+            cacheMaxAge = parseInt(ageArg, 10) * 60 * 60 * 1000; // 預設為小時
+        }
+    }
+
     if (!url || url.startsWith('--')) {
         console.error('請提供要檢測的網址');
         console.error('使用方式:');
@@ -587,16 +876,31 @@ if (require.main === module) {
         console.error('  npm run check [--dns 8.8.8.8] [--ipinfo-token your-token] [--save] https://example.com');
         console.error('  npm run check [--no-adblock] https://example.com  # 不使用 adblock 清單');
         console.error('  npm run check [--adblock-url url1,url2] https://example.com  # 使用自訂 adblock 清單');
+        console.error('  npm run check [--debug] https://example.com  # 開啟 debug 模式，顯示詳細資訊');
+        console.error('  npm run check [--no-cache] https://example.com  # 不使用快取，強制重新下載');
+        console.error('  npm run check [--cache-max-age 12h] https://example.com  # 設定快取過期時間（12h/30m）');
         process.exit(1);
     }
 
     // 執行檢測
-    checkWebsiteResilience(url, { customDNS, token, save, useAdblock, adblockUrls })
+    checkWebsiteResilience(url, {
+        customDNS,
+        token,
+        save,
+        useAdblock,
+        adblockUrls,
+        debug,
+        useCache,
+        cacheMaxAge
+    })
         .then(() => {
             console.log('檢測完成');
         })
         .catch(error => {
             console.error('檢測失敗:', error);
+            if (debug) {
+                console.error('錯誤堆疊:', error.stack);
+            }
             process.exit(1);
         });
 }

@@ -202,6 +202,19 @@ node no-global-connection-check.js --adblock-url https://filter.futa.gg/hosts_ab
 node no-global-connection-check.js --adblock-url https://filter.futa.gg/hosts_abp.txt,https://filter.futa.gg/nofarm_abp.txt https://example.com
 ```
 
+- **開啟 debug 模式**（顯示詳細資訊）：
+```bash
+node no-global-connection-check.js --debug https://example.com
+```
+
+Debug 模式會顯示：
+- 所有收集到的請求列表
+- 清理後的域名列表
+- 被忽略的域名列表
+- 每個域名的 IP 檢查過程
+- Adblock 清單載入資訊
+- 錯誤堆疊資訊（發生錯誤時）
+
 ### 檢測結果說明
 - O：服務位於台灣境內
 - ?：使用具有台灣節點的雲端服務（如 Google Cloud、AWS 等）
