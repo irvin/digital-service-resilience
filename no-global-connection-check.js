@@ -47,7 +47,6 @@ const CLOUD_PROVIDERS = [
 
 // 動態載入的 adblock 清單域名（會在初始化時載入）
 let ADBLOCK_DOMAINS = new Set();
-let IGNORABLE_DOMAINS = [...MANUAL_IGNORABLE_DOMAINS];
 
 /**
  * 解析 adblock 規則，提取域名
@@ -278,8 +277,6 @@ async function initializeIgnorableDomains(options = {}) {
     if (useAdblock) {
         try {
             ADBLOCK_DOMAINS = await loadAdblockLists(adblockUrls, { useCache });
-            // 將 adblock 域名加入可忽略列表
-            IGNORABLE_DOMAINS.push(...Array.from(ADBLOCK_DOMAINS));
             console.log(`已載入 ${ADBLOCK_DOMAINS.size} 個 adblock 域名規則`);
         } catch (error) {
             console.warn('載入 adblock 清單失敗，使用預設清單:', error.message);
