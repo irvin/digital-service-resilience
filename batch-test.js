@@ -80,6 +80,7 @@ async function batchTest(options = {}) {
         success: 0,
         failed: 0,
         skipped: 0,
+        errorSites: [],
         results: []
     };
 
@@ -124,15 +125,36 @@ async function batchTest(options = {}) {
             console.log(`✓ 檢測完成: O=${result.test_results?.domestic || 0}, ?=${result.test_results?.cloud_w_domestic_node || 0}, X=${result.test_results?.foreign || 0}`);
 
         } catch (error) {
-            console.error(`✗ 檢測失敗: ${error.message}`);
-            stats.failed++;
-            stats.results.push({
-                website: website.website,
-                url: website.url,
-                rank: website.rank,
-                status: 'failed',
-                error: error.message
-            });
+            // 只要有 errorReason，就視為「測試錯誤」，其餘視為一般失敗
+            const errResult = error.result || error;
+            if (errResult?.errorReason) {
+                console.log(`⚠ 測試錯誤: ${errResult.errorReason}`);
+                stats.errorSites.push({
+                    website: website.website,
+                    url: website.url,
+                    rank: website.rank,
+                    errorReason: errResult.errorReason,
+                    errorDetails: errResult.errorDetails
+                });
+                stats.results.push({
+                    website: website.website,
+                    url: website.url,
+                    rank: website.rank,
+                    status: 'error',
+                    errorReason: errResult.errorReason,
+                    errorDetails: errResult.errorDetails
+                });
+            } else {
+                console.error(`✗ 檢測失敗: ${error.message}`);
+                stats.failed++;
+                stats.results.push({
+                    website: website.website,
+                    url: website.url,
+                    rank: website.rank,
+                    status: 'failed',
+                    error: error.message
+                });
+            }
         }
 
         // 如果不是最後一個，等待一段時間再繼續
@@ -149,12 +171,14 @@ async function batchTest(options = {}) {
     console.log(`總數: ${stats.total}`);
     console.log(`成功: ${stats.success}`);
     console.log(`失敗: ${stats.failed}`);
+    console.log(`測試錯誤: ${stats.errorSites.length}`);
     console.log(`跳過: ${stats.skipped}`);
     console.log('='.repeat(60));
 
     // 儲存總結報告
     if (save) {
-        const summaryPath = `batch_summary_${Date.now()}.json`;
+        const timestamp = Date.now();
+        const summaryPath = `batch_summary_${timestamp}.json`;
         const summary = {
             timestamp: new Date().toISOString(),
             options: {
@@ -171,13 +195,28 @@ async function batchTest(options = {}) {
                 total: stats.total,
                 success: stats.success,
                 failed: stats.failed,
+                testErrors: stats.errorSites.length,
                 skipped: stats.skipped
             },
-            results: stats.results
+            results: stats.results,
+            errorSites: stats.errorSites
         };
 
         await fs.writeFile(summaryPath, JSON.stringify(summary, null, 2));
         console.log(`\n總結報告已儲存: ${summaryPath}`);
+
+        // 如果有錯誤網站，輸出獨立的錯誤網站清單
+        if (stats.errorSites.length > 0) {
+            const errorListPath = `batch_errors_${timestamp}.json`;
+            const errorList = {
+                timestamp: new Date().toISOString(),
+                totalErrors: stats.errorSites.length,
+                errorSites: stats.errorSites
+            };
+
+            await fs.writeFile(errorListPath, JSON.stringify(errorList, null, 2));
+            console.log(`錯誤網站清單已儲存: ${errorListPath}`);
+        }
     }
 
     return stats;

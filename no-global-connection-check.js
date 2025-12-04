@@ -634,6 +634,47 @@ function calculateResilience(ipInfoResults) {
     return scores;
 }
 
+/**
+ * Cloudflare Challenge 錯誤類別
+ */
+class CloudflareChallengeError extends Error {
+    constructor(result) {
+        super('Cloudflare Challenge detected');
+        this.name = 'CloudflareChallengeError';
+        this.result = result;
+    }
+}
+
+/**
+ * 檢測是否遇到 Cloudflare challenge
+ * @param {Array} domainDetails - 域名詳細資訊陣列
+ * @returns {Object|null} 如果檢測到 Cloudflare challenge 則返回錯誤資訊，否則返回 null
+ */
+function detectCloudflareChallenge(domainDetails) {
+    if (!domainDetails || domainDetails.length === 0) {
+        return null;
+    }
+
+    // 檢查是否有 Cloudflare challenge 的跡象
+    const challengeIndicators = domainDetails.filter(detail => {
+        // 檢查 originalUrl 是否包含 challenge-platform 或域名是 challenges.cloudflare.com
+        return detail.originalUrl && (
+            detail.originalUrl.includes('cdn-cgi/challenge-platform') ||
+            detail.originalUrl.includes('challenges.cloudflare.com')
+        );
+    });
+
+    if (challengeIndicators.length > 0) {
+        return {
+            testError: true,
+            errorReason: 'Cloudflare Challenge',
+            errorDetails: challengeIndicators
+        };
+    }
+
+    return null;
+}
+
 async function getLocalIPInfo(options = {}) {
     try {
         // 優先使用命令列參數的 token，其次使用環境變數
@@ -858,6 +899,15 @@ async function checkWebsiteResilience(url, options = {}) {
             )
         };
 
+        // 檢測 Cloudflare challenge
+        const cloudflareChallenge = detectCloudflareChallenge(result.domainDetails);
+        if (cloudflareChallenge) {
+            // 將錯誤資訊加入到結果中
+            Object.assign(result, cloudflareChallenge);
+            // 拋出錯誤，讓 catch 區塊處理
+            throw new CloudflareChallengeError(result);
+        }
+
         // 如果指定要儲存結果
         if (options.save) {
             // 確保目錄存在
@@ -883,8 +933,43 @@ async function checkWebsiteResilience(url, options = {}) {
 
         return result;
     } catch (error) {
-        console.error('檢測過程發生錯誤:', error);
-        throw error;
+        // 如果是 Cloudflare Challenge 錯誤，寫入錯誤資訊到 JSON
+        if (error instanceof CloudflareChallengeError) {
+            console.error('檢測到 Cloudflare Challenge:', error.message);
+
+            if (options.save) {
+                try {
+                    // 確保目錄存在
+                    await fs.mkdir('test_results', { recursive: true });
+
+                    // 從錯誤結果中取得 URL 資訊
+                    const urlToUse = error.result.canonicalURL || error.result.url;
+                    const urlObj = new URL(urlToUse);
+                    let filename = `${urlObj.hostname}${urlObj.pathname.replace(/\//g, '_')}${
+                        urlObj.search ? '_' + urlObj.search.replace(/[?&=]/g, '_') : ''
+                    }`.replace(/_+$/, '');
+
+                    // 如果檔名太長，直接截斷到 95 字元（預留 .error.json 的空間）
+                    if (filename.length > 95) {
+                        filename = filename.slice(0, 95);
+                    }
+
+                    const outputPath = path.resolve(`test_results/${filename}.error.json`);
+
+                    // 儲存包含錯誤資訊的結果
+                    await fs.writeFile(outputPath, JSON.stringify(error.result, null, 2));
+                    console.log(`\n錯誤結果已儲存至: ${outputPath}`);
+                } catch (saveError) {
+                    console.error('無法儲存錯誤結果:', saveError.message);
+                }
+            }
+
+            // 重新拋出錯誤，讓上層處理
+            throw error;
+        } else {
+            console.error('檢測過程發生錯誤:', error);
+            throw error;
+        }
     }
 }
 
