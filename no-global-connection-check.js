@@ -772,6 +772,16 @@ async function checkWebsiteResilience(url, options = {}) {
     let customDNS = null;
     let httpStatus = null;
 
+    // 檢查原始 URL 是否為頂層網域（用於決定檔名生成時是否使用 canonical）
+    let isTopLevelDomain = false;
+    try {
+        const originalUrlObj = new URL(url.startsWith('http://') || url.startsWith('https://') ? url : 'https://' + url);
+        const originalPath = originalUrlObj.pathname || '';
+        isTopLevelDomain = originalPath === '' || originalPath === '/';
+    } catch {
+        // 若 URL 解析失敗，預設為 false
+    }
+
     try {
         // 初始化可忽略的域名列表（如果尚未初始化）
         if (ADBLOCK_DOMAINS.size === 0 && options.useAdblock !== false) {
@@ -804,7 +814,7 @@ async function checkWebsiteResilience(url, options = {}) {
         canonicalURL = harResult.canonical || null;
         httpStatus = harResult.httpStatus || null;
 
-        if (canonicalURL !== url) {
+        if (canonicalURL && canonicalURL !== url) {
             console.log(`檢測到 canonical URL: ${canonicalURL}`);
         }
 
@@ -998,8 +1008,10 @@ async function checkWebsiteResilience(url, options = {}) {
             // 確保目錄存在
             await fs.mkdir('test_results', { recursive: true });
 
-            // 自動生成輸出檔名 - 使用 canonical URL
-            const urlObj = new URL(canonicalURL);
+            // 自動生成輸出檔名
+            // 如果原始 URL 是頂層網域，使用原始 URL；否則使用 canonical URL（如果有的話）
+            const urlForFilename = (isTopLevelDomain || !canonicalURL) ? url : canonicalURL;
+            const urlObj = new URL(urlForFilename);
             let filename = `${urlObj.hostname}${urlObj.pathname.replace(/\//g, '_')}${
                 urlObj.search ? '_' + urlObj.search.replace(/[?&=]/g, '_') : ''
             }`.replace(/_+$/, '');
@@ -1035,9 +1047,15 @@ async function checkWebsiteResilience(url, options = {}) {
             const errorHttpStatus = httpStatusMatch ? parseInt(httpStatusMatch[1], 10) : httpStatus;
 
             // 確保 URL 有 protocol（用於建立檔名）
+            // 如果原始 URL 是頂層網域，使用原始 URL；否則使用 canonical URL（如果有的話）
             let urlForFilename = inputURL;
             if (urlForFilename && !urlForFilename.startsWith('http://') && !urlForFilename.startsWith('https://')) {
                 urlForFilename = 'https://' + urlForFilename;
+            }
+
+            // 如果不是頂層網域且有 canonical URL，使用 canonical URL 來生成檔名
+            if (!isTopLevelDomain && canonicalURL) {
+                urlForFilename = canonicalURL;
             }
 
             errorResult = {
@@ -1087,7 +1105,11 @@ async function checkWebsiteResilience(url, options = {}) {
                 await fs.mkdir(errorDir, { recursive: true });
 
                 // 從錯誤結果中取得 URL 資訊
-                const urlToUse = errorResult.canonicalURL || errorResult.url;
+                // 如果原始 URL 是頂層網域，使用原始 URL；否則使用 canonical URL（如果有的話）
+                let urlToUse = errorResult.url;
+                if (!isTopLevelDomain && errorResult.canonicalURL) {
+                    urlToUse = errorResult.canonicalURL;
+                }
                 const urlObj = new URL(urlToUse);
                 let filename = `${urlObj.hostname}${urlObj.pathname.replace(/\//g, '_')}${
                     urlObj.search ? '_' + urlObj.search.replace(/[?&=]/g, '_') : ''
