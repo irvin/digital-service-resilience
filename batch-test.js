@@ -49,7 +49,8 @@ async function batchTest(options = {}) {
         adblockUrls = [],
         useCache = true,
         testListPath,
-        debug = false
+        debug = false,
+        timeout = 120000
     } = options;
 
     if (!testListPath) {
@@ -118,7 +119,8 @@ async function batchTest(options = {}) {
                     useAdblock,
                     adblockUrls,
                     useCache,
-                    debug
+                    debug,
+                    timeout
                 });
 
                 // 記錄統計
@@ -215,7 +217,8 @@ async function batchTest(options = {}) {
                 customDNS,
                 useAdblock,
                 adblockUrls,
-                useCache
+                useCache,
+                timeout
             },
             statistics: {
                 total: stats.total,
@@ -263,6 +266,7 @@ if (require.main === module) {
     let adblockUrls = [];
     let useCache = true;
     let debug = false;
+    let timeout = 120000; // 預設 120 秒
 
     // 解析 --limit
     const limitIndex = args.indexOf('--limit');
@@ -319,6 +323,12 @@ if (require.main === module) {
     // 解析 --debug
     debug = args.includes('--debug');
 
+    // 解析 --timeout
+    const timeoutIndex = args.indexOf('--timeout');
+    if (timeoutIndex !== -1 && args[timeoutIndex + 1]) {
+        timeout = parseInt(args[timeoutIndex + 1], 10) * 1000; // 轉換為毫秒
+    }
+
     // 從最後一個參數讀取測試清單路徑（必須不是以 -- 開頭的選項）
     let testListPath = null;
     for (let i = args.length - 1; i >= 0; i--) {
@@ -345,6 +355,7 @@ if (require.main === module) {
         console.log('  --adblock-url URL      使用自訂 adblock 清單 URL（可用逗號分隔多個）');
         console.log('  --no-cache             不使用快取，強制重新下載');
         console.log('  --debug                開啟 debug 模式，顯示詳細資訊');
+        console.log('  --timeout N            設定頁面載入 timeout（秒，預設 120）');
         console.log('  --help, -h             顯示此說明');
         console.log('');
         console.log('範例:');
@@ -376,7 +387,8 @@ if (require.main === module) {
         adblockUrls,
         useCache,
         testListPath,
-        debug
+        debug,
+        timeout
     }).catch(error => {
         console.error('批量測試失敗:', error);
         if (debug) {

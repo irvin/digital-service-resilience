@@ -284,7 +284,9 @@ async function initializeIgnorableDomains(options = {}) {
     }
 }
 
-async function collectHARAndCanonical(url) {
+async function collectHARAndCanonical(url, options = {}) {
+    const timeout = options.timeout || 120000; // 預設 120 秒
+
     const browser = await chromium.launch();
     const context = await browser.newContext({
         bypassCSP: true,
@@ -298,7 +300,10 @@ async function collectHARAndCanonical(url) {
         await context.tracing.start({ snapshots: true, screenshots: true });
 
         // 訪問頁面並檢查響應狀態碼
-        const response = await page.goto(url, { waitUntil: 'domcontentloaded' });
+        const response = await page.goto(url, {
+            waitUntil: 'domcontentloaded',
+            timeout: timeout
+        });
 
         // 取得 HTTP 狀態碼
         const httpStatus = response ? response.status() : null;
@@ -309,7 +314,7 @@ async function collectHARAndCanonical(url) {
             throw new Error(`HTTP ${httpStatus} ${statusText}`);
         }
 
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('networkidle', { timeout: timeout });
 
         // 嘗試獲取 canonical URL
         const canonical = await page.evaluate((originalURL) => {
@@ -813,7 +818,9 @@ async function checkWebsiteResilience(url, options = {}) {
         let retriedWithWww = false;
 
         try {
-            harResult = await collectHARAndCanonical(url);
+            harResult = await collectHARAndCanonical(url, {
+                timeout: options.timeout || 120000
+            });
         } catch (error) {
             // 檢查是否為 DNS/網路錯誤，且原始 URL 沒有 www. 前綴
             const isDnsError = error.message && (error.message.includes('ERR_NAME_NOT_RESOLVED'));
@@ -840,7 +847,9 @@ async function checkWebsiteResilience(url, options = {}) {
                     console.log(`DNS 解析失敗，嘗試使用 www. 版本: ${wwwUrl}`);
                     retriedWithWww = true;
 
-                    harResult = await collectHARAndCanonical(wwwUrl);
+                    harResult = await collectHARAndCanonical(wwwUrl, {
+                        timeout: options.timeout || 120000
+                    });
                     // 如果成功，更新 url 和 inputURL
                     url = wwwUrl;
                     inputURL = wwwUrl;
@@ -1194,6 +1203,7 @@ if (require.main === module) {
     let adblockUrls = [];
     let debug = false;
     let useCache = true;
+    let timeout = 120000; // 預設 120 秒
 
     // 確保 URL 有 protocol
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
@@ -1209,6 +1219,12 @@ if (require.main === module) {
     const tokenIndex = args.indexOf('--ipinfo-token');
     if (tokenIndex !== -1 && args[tokenIndex + 1]) {
         token = args[tokenIndex + 1];
+    }
+
+    // 解析 timeout 參數
+    const timeoutIndex = args.indexOf('--timeout');
+    if (timeoutIndex !== -1 && args[timeoutIndex + 1]) {
+        timeout = parseInt(args[timeoutIndex + 1], 10) * 1000; // 轉換為毫秒
     }
 
     // 檢查是否要儲存結果
@@ -1246,6 +1262,7 @@ if (require.main === module) {
         console.error('  npm run check [--adblock-url url1,url2] https://example.com  # 使用自訂 adblock 清單');
         console.error('  npm run check [--debug] https://example.com  # 開啟 debug 模式，顯示詳細資訊');
         console.error('  npm run check [--no-cache] https://example.com  # 不使用快取，強制重新下載');
+        console.error('  npm run check [--timeout N] https://example.com  # 設定頁面載入 timeout（秒，預設 120）');
         process.exit(1);
     }
 
@@ -1257,7 +1274,8 @@ if (require.main === module) {
         useAdblock,
         adblockUrls,
         debug,
-        useCache
+        useCache,
+        timeout
     })
         .then(() => {
             console.log('檢測完成');
