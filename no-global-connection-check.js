@@ -21,7 +21,13 @@ const crypto = require('crypto');
 
 // 可忽略的域名列表（手動維護的）
 const MANUAL_IGNORABLE_DOMAINS = [
-    'fonts.gstatic.com'
+    'fonts.gstatic.com',
+    'google-analytics.com',
+    'analytics.ahrefs.com',
+    'static.cloudflareinsights.com',
+    'static.hotjar.com',
+    '*.criteo.com',
+    '*.clarity.ms'
 ];
 
 // 台灣 ASN 列表 - 暫時不使用
@@ -379,8 +385,19 @@ function shouldIgnoreDomain(hostname, targetHostname = null) {
         }
     }
 
-    // 檢查手動維護的清單（使用 includes 以支援部分匹配）
-    const matchedManualDomain = MANUAL_IGNORABLE_DOMAINS.find(domain => hostname.includes(domain));
+    // 檢查手動維護的清單，支援一般字串與萬用字元（例如 *.example.com）
+    const matchedManualDomain = MANUAL_IGNORABLE_DOMAINS.find(domainPattern => {
+        if (!domainPattern) return false;
+
+        // 萬用字元前綴：*.example.com → 匹配 example.com 以及任何其子網域
+        if (domainPattern.startsWith('*.')) {
+            const base = domainPattern.slice(2); // 去掉 "*."
+            return hostname === base || hostname.endsWith(`.${base}`);
+        }
+
+        // 一般情況維持原本的 includes 行為
+        return hostname.includes(domainPattern);
+    });
     if (matchedManualDomain) {
         return true;
     }
@@ -418,8 +435,17 @@ function getIgnoreReason(hostname, targetHostname = null) {
         }
     }
 
-    // 檢查手動維護的清單
-    const matchedManualDomain = MANUAL_IGNORABLE_DOMAINS.find(domain => hostname.includes(domain));
+    // 檢查手動維護的清單（支援萬用字元）
+    const matchedManualDomain = MANUAL_IGNORABLE_DOMAINS.find(domainPattern => {
+        if (!domainPattern) return false;
+
+        if (domainPattern.startsWith('*.')) {
+            const base = domainPattern.slice(2);
+            return hostname === base || hostname.endsWith(`.${base}`);
+        }
+
+        return hostname.includes(domainPattern);
+    });
     if (matchedManualDomain) {
         return `手動維護清單（匹配: ${matchedManualDomain}）`;
     }
