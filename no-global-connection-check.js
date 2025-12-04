@@ -179,11 +179,11 @@ async function writeCache(cachePath, content) {
  * @param {Array<string>} listUrls - adblock 清單的 URL 陣列
  * @param {Object} options - 選項
  * @param {boolean} options.useCache - 是否使用快取（預設 true）
- * @param {number} options.cacheMaxAge - 快取最大年齡（毫秒），預設 24 小時
  * @returns {Promise<Set<string>>} 解析後的域名集合
  */
 async function loadAdblockLists(listUrls = [], options = {}) {
-    const { useCache = true, cacheMaxAge = 24 * 60 * 60 * 1000 } = options;
+    const { useCache = true } = options;
+    const cacheMaxAge = 24 * 60 * 60 * 1000; // 固定 24 小時
     const defaultLists = [
         'https://easylist.to/easylist/easylist.txt',
         'https://easylist.to/easylist/easyprivacy.txt'
@@ -263,14 +263,12 @@ async function loadAdblockLists(listUrls = [], options = {}) {
  * @param {Array<string>} options.adblockUrls - 自訂 adblock 清單 URL
  * @param {boolean} options.useAdblock - 是否使用 adblock 清單（預設 true）
  * @param {boolean} options.useCache - 是否使用快取（預設 true）
- * @param {number} options.cacheMaxAge - 快取最大年齡（毫秒），預設 24 小時
  */
 async function initializeIgnorableDomains(options = {}) {
     const {
         adblockUrls = [],
         useAdblock = true,
-        useCache = true,
-        cacheMaxAge = 24 * 60 * 60 * 1000
+        useCache = true
     } = options;
 
     // 重置為手動維護的清單
@@ -278,7 +276,7 @@ async function initializeIgnorableDomains(options = {}) {
 
     if (useAdblock) {
         try {
-            ADBLOCK_DOMAINS = await loadAdblockLists(adblockUrls, { useCache, cacheMaxAge });
+            ADBLOCK_DOMAINS = await loadAdblockLists(adblockUrls, { useCache });
             // 將 adblock 域名加入可忽略列表
             IGNORABLE_DOMAINS.push(...Array.from(ADBLOCK_DOMAINS));
             console.log(`已載入 ${ADBLOCK_DOMAINS.size} 個 adblock 域名規則`);
@@ -496,7 +494,7 @@ async function checkIPLocationWithAPI(domain, options = {}) {
 
         // 檢查快取選項
         const useCache = options.useCache !== false;
-        const cacheMaxAge = options.cacheMaxAge || 24 * 60 * 60 * 1000; // 預設 24 小時
+        const cacheMaxAge = 24 * 60 * 60 * 1000; // 固定 24 小時
         const cachePath = getIPinfoCacheFilePath(ip);
 
         // 嘗試讀取快取
@@ -593,7 +591,6 @@ async function checkIPLocation(domain, customDNS = null, options = {}) {
     const apiResult = await checkIPLocationWithAPI(domain, {
         customDNS,
         useCache: options.useCache !== false,
-        cacheMaxAge: options.cacheMaxAge,
         token: options.token,
         debug: options.debug
     });
@@ -696,8 +693,7 @@ async function checkWebsiteResilience(url, options = {}) {
             await initializeIgnorableDomains({
                 adblockUrls: options.adblockUrls,
                 useAdblock: options.useAdblock !== false,
-                useCache: options.useCache !== false,
-                cacheMaxAge: options.cacheMaxAge
+                useCache: options.useCache !== false
             });
             if (options.debug) {
                 console.log(`[DEBUG] 已載入 ${ADBLOCK_DOMAINS.size} 個 adblock 域名規則`);
@@ -806,7 +802,6 @@ async function checkWebsiteResilience(url, options = {}) {
                 }
                 const result = await checkIPLocation(domain, customDNS, {
                     useCache: options.useCache !== false,
-                    cacheMaxAge: options.cacheMaxAge,
                     token: options.token,
                     debug: options.debug
                 });
@@ -839,13 +834,17 @@ async function checkWebsiteResilience(url, options = {}) {
             url: inputURL,           // 使用原始輸入的 URL
             canonicalURL,            // 保存實際訪問的 URL
             timestamp: new Date().toISOString(),
+            testParameters: {
+                customDNS: customDNS || null,
+                useAdblock: options.useAdblock !== false,
+                adblockUrls: options.adblockUrls || [],
+                useCache: options.useCache !== false,
+                hasIPinfoToken: !!(options.token || process.env.IPINFO_TOKEN)
+            },
             testingEnvironment: {
                 ip: localIPInfo.ip,
                 ...localIPInfo,
-                dnsServers: {
-                    type: customDNS ? 'custom' : 'system',
-                    servers: customDNS ? [customDNS] : dns.getServers()
-                }
+                dnsServer: customDNS || (dns.getServers().length > 0 ? dns.getServers()[0] : null)
             },
             requestCount: requests.length,
             uniqueDomains: domains.length,
@@ -900,7 +899,6 @@ if (require.main === module) {
     let adblockUrls = [];
     let debug = false;
     let useCache = true;
-    let cacheMaxAge = 24 * 60 * 60 * 1000; // 預設 24 小時
 
     // 確保 URL 有 protocol
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
@@ -944,19 +942,6 @@ if (require.main === module) {
         useCache = false;
     }
 
-    const cacheMaxAgeIndex = args.indexOf('--cache-max-age');
-    if (cacheMaxAgeIndex !== -1 && args[cacheMaxAgeIndex + 1]) {
-        // 支援格式：數字（小時）或數字+h（小時）、數字+m（分鐘）
-        const ageArg = args[cacheMaxAgeIndex + 1];
-        if (ageArg.endsWith('h')) {
-            cacheMaxAge = parseInt(ageArg.slice(0, -1), 10) * 60 * 60 * 1000;
-        } else if (ageArg.endsWith('m')) {
-            cacheMaxAge = parseInt(ageArg.slice(0, -1), 10) * 60 * 1000;
-        } else {
-            cacheMaxAge = parseInt(ageArg, 10) * 60 * 60 * 1000; // 預設為小時
-        }
-    }
-
     if (!url || url.startsWith('--')) {
         console.error('請提供要檢測的網址');
         console.error('使用方式:');
@@ -966,7 +951,6 @@ if (require.main === module) {
         console.error('  npm run check [--adblock-url url1,url2] https://example.com  # 使用自訂 adblock 清單');
         console.error('  npm run check [--debug] https://example.com  # 開啟 debug 模式，顯示詳細資訊');
         console.error('  npm run check [--no-cache] https://example.com  # 不使用快取，強制重新下載');
-        console.error('  npm run check [--cache-max-age 12h] https://example.com  # 設定快取過期時間（12h/30m）');
         process.exit(1);
     }
 
@@ -978,8 +962,7 @@ if (require.main === module) {
         useAdblock,
         adblockUrls,
         debug,
-        useCache,
-        cacheMaxAge
+        useCache
     })
         .then(() => {
             console.log('檢測完成');
