@@ -284,8 +284,14 @@ async function initializeIgnorableDomains(options = {}) {
     }
 }
 
-async function collectHARAndCanonical(url) {
+async function collectHARAndCanonical(url, options = {}) {
+    const timeout = options.timeout || 120000; // 預設 120 秒
+    const debug = options.debug || false;
+
     const browser = await chromium.launch();
+    // const browser = await chromium.launch({
+    //     headless: !debug // debug 模式下顯示瀏覽器視窗
+    // });
     const context = await browser.newContext({
         bypassCSP: true,
         ignoreHTTPSErrors: true
@@ -293,12 +299,68 @@ async function collectHARAndCanonical(url) {
 
     const page = await context.newPage();
 
+    // 如果啟用 debug，監聽各種事件
+    if (debug) {
+        console.log(`[DEBUG] 開始載入頁面: ${url}`);
+
+        // 監聽請求
+        page.on('request', request => {
+            console.log(`[DEBUG] → 請求: ${request.method()} ${request.url()}`);
+        });
+
+        // 監聽回應
+        page.on('response', response => {
+            const status = response.status();
+            const statusText = status >= 400 ? '❌' : '✓';
+            console.log(`[DEBUG] ${statusText} 回應: ${status} ${response.url()}`);
+        });
+
+        // 監聽請求失敗
+        page.on('requestfailed', request => {
+            console.log(`[DEBUG] ✗ 請求失敗: ${request.method()} ${request.url()} - ${request.failure()?.errorText || 'Unknown'}`);
+        });
+
+        // 監聽載入狀態變化
+        page.on('load', () => {
+            console.log(`[DEBUG] ✓ 頁面載入完成 (load)`);
+        });
+
+        page.on('domcontentloaded', () => {
+            console.log(`[DEBUG] ✓ DOM 內容載入完成 (domcontentloaded)`);
+        });
+
+        // 監聽 console 訊息
+        page.on('console', msg => {
+            const type = msg.type();
+            const text = msg.text();
+            if (type === 'error' || type === 'warning') {
+                console.log(`[DEBUG] Console ${type}: ${text}`);
+            }
+        });
+
+        // 監聽頁面錯誤
+        page.on('pageerror', error => {
+            console.log(`[DEBUG] ✗ 頁面錯誤: ${error.message}`);
+        });
+    }
+
     try {
         // 開始收集 HAR
         await context.tracing.start({ snapshots: true, screenshots: true });
 
+        if (debug) {
+            console.log(`[DEBUG] 正在導航到: ${url}`);
+        }
+
         // 訪問頁面並檢查響應狀態碼
-        const response = await page.goto(url, { waitUntil: 'domcontentloaded' });
+        const response = await page.goto(url, {
+            waitUntil: 'domcontentloaded',
+            timeout: timeout
+        });
+
+        if (debug) {
+            console.log(`[DEBUG] ✓ 導航完成，狀態碼: ${response ? response.status() : 'N/A'}`);
+        }
 
         // 取得 HTTP 狀態碼
         const httpStatus = response ? response.status() : null;
@@ -309,7 +371,15 @@ async function collectHARAndCanonical(url) {
             throw new Error(`HTTP ${httpStatus} ${statusText}`);
         }
 
-        await page.waitForLoadState('networkidle');
+        if (debug) {
+            console.log(`[DEBUG] 等待頁面載入狀態: load`);
+        }
+
+        await page.waitForLoadState('load', { timeout: timeout });
+
+        if (debug) {
+            console.log(`[DEBUG] ✓ 頁面載入狀態: load 完成`);
+        }
 
         // 嘗試獲取 canonical URL
         const canonical = await page.evaluate((originalURL) => {
@@ -322,6 +392,10 @@ async function collectHARAndCanonical(url) {
             return originalURL;
         }, url);
 
+        if (debug) {
+            console.log(`[DEBUG] Canonical URL: ${canonical}`);
+        }
+
         // 獲取 connection 數據
         const requests = await page.evaluate(() => {
             return performance.getEntriesByType('resource').map(entry => ({
@@ -330,9 +404,16 @@ async function collectHARAndCanonical(url) {
             }));
         });
 
+        if (debug) {
+            console.log(`[DEBUG] 收集到 ${requests.length} 個資源請求`);
+        }
+
         return { requests, canonical, httpStatus };
     } finally {
         await browser.close();
+        if (debug) {
+            console.log(`[DEBUG] 瀏覽器已關閉`);
+        }
     }
 }
 
@@ -772,6 +853,16 @@ async function checkWebsiteResilience(url, options = {}) {
     let customDNS = null;
     let httpStatus = null;
 
+    // 檢查原始 URL 是否為頂層網域（用於決定檔名生成時是否使用 canonical）
+    let isTopLevelDomain = false;
+    try {
+        const originalUrlObj = new URL(url.startsWith('http://') || url.startsWith('https://') ? url : 'https://' + url);
+        const originalPath = originalUrlObj.pathname || '';
+        isTopLevelDomain = originalPath === '' || originalPath === '/';
+    } catch {
+        // 若 URL 解析失敗，預設為 false
+    }
+
     try {
         // 初始化可忽略的域名列表（如果尚未初始化）
         if (ADBLOCK_DOMAINS.size === 0 && options.useAdblock !== false) {
@@ -799,12 +890,74 @@ async function checkWebsiteResilience(url, options = {}) {
         console.log(`開始檢測網站: ${url}`);
 
         // 1. 收集 connections 和 canonical URL
-        const harResult = await collectHARAndCanonical(url);
+        let harResult = null;
+        let retriedWithWww = false;
+
+        try {
+            harResult = await collectHARAndCanonical(url, {
+                timeout: options.timeout || 120000,
+                debug: options.debug
+            });
+        } catch (error) {
+            // 檢查是否為 DNS/網路錯誤或 HTTP 404 錯誤
+            const isDnsError = error.message && (error.message.includes('ERR_NAME_NOT_RESOLVED'));
+            const isHttp404 = error.message && /^HTTP 404/.test(error.message);
+
+            // 檢查原始 URL 是否沒有 www. 前綴
+            let shouldRetryWithWww = false;
+            try {
+                const urlObj = new URL(url);
+                const hostname = urlObj.hostname;
+                // 如果是 DNS 錯誤或 HTTP 404，且沒有 www 前綴，則重試
+                if (!hostname.startsWith('www.') && (isDnsError || isHttp404)) {
+                    shouldRetryWithWww = true;
+                }
+            } catch {
+                // URL 解析失敗，不重試
+            }
+
+            if (shouldRetryWithWww) {
+                // 嘗試加上 www. 前綴
+                try {
+                    const urlObj = new URL(url);
+                    urlObj.hostname = 'www.' + urlObj.hostname;
+                    const wwwUrl = urlObj.toString();
+
+                    const errorType = isDnsError ? 'DNS 解析失敗' : 'HTTP 404 錯誤';
+                    console.log(`${errorType}，嘗試使用 www. 版本: ${wwwUrl}`);
+                    retriedWithWww = true;
+
+                    harResult = await collectHARAndCanonical(wwwUrl, {
+                        timeout: options.timeout || 120000,
+                        debug: options.debug
+                    });
+                    // 如果成功，更新 url 和 inputURL
+                    url = wwwUrl;
+                    inputURL = wwwUrl;
+                } catch (retryError) {
+                    // 重試也失敗，更新 URL 為 www 版本，然後拋出重試時的錯誤
+                    const urlObj = new URL(url);
+                    urlObj.hostname = 'www.' + urlObj.hostname;
+                    const wwwUrl = urlObj.toString();
+                    url = wwwUrl;
+                    inputURL = wwwUrl;
+                    throw retryError;  // 拋出重試時的錯誤，而不是原始錯誤
+                }
+            } else {
+                // 不符合重試條件，直接拋出錯誤
+                throw error;
+            }
+        }
+
         requests = harResult.requests || [];
         canonicalURL = harResult.canonical || null;
         httpStatus = harResult.httpStatus || null;
 
-        if (canonicalURL !== url) {
+        if (retriedWithWww) {
+            console.log(`成功使用 www. 版本進行測試`);
+        }
+
+        if (canonicalURL && canonicalURL !== url) {
             console.log(`檢測到 canonical URL: ${canonicalURL}`);
         }
 
@@ -998,8 +1151,10 @@ async function checkWebsiteResilience(url, options = {}) {
             // 確保目錄存在
             await fs.mkdir('test_results', { recursive: true });
 
-            // 自動生成輸出檔名 - 使用 canonical URL
-            const urlObj = new URL(canonicalURL);
+            // 自動生成輸出檔名
+            // 如果原始 URL 是頂層網域，使用原始 URL；否則使用 canonical URL（如果有的話）
+            const urlForFilename = (isTopLevelDomain || !canonicalURL) ? url : canonicalURL;
+            const urlObj = new URL(urlForFilename);
             let filename = `${urlObj.hostname}${urlObj.pathname.replace(/\//g, '_')}${
                 urlObj.search ? '_' + urlObj.search.replace(/[?&=]/g, '_') : ''
             }`.replace(/_+$/, '');
@@ -1035,9 +1190,15 @@ async function checkWebsiteResilience(url, options = {}) {
             const errorHttpStatus = httpStatusMatch ? parseInt(httpStatusMatch[1], 10) : httpStatus;
 
             // 確保 URL 有 protocol（用於建立檔名）
+            // 如果原始 URL 是頂層網域，使用原始 URL；否則使用 canonical URL（如果有的話）
             let urlForFilename = inputURL;
             if (urlForFilename && !urlForFilename.startsWith('http://') && !urlForFilename.startsWith('https://')) {
                 urlForFilename = 'https://' + urlForFilename;
+            }
+
+            // 如果不是頂層網域且有 canonical URL，使用 canonical URL 來生成檔名
+            if (!isTopLevelDomain && canonicalURL) {
+                urlForFilename = canonicalURL;
             }
 
             errorResult = {
@@ -1087,7 +1248,11 @@ async function checkWebsiteResilience(url, options = {}) {
                 await fs.mkdir(errorDir, { recursive: true });
 
                 // 從錯誤結果中取得 URL 資訊
-                const urlToUse = errorResult.canonicalURL || errorResult.url;
+                // 如果原始 URL 是頂層網域，使用原始 URL；否則使用 canonical URL（如果有的話）
+                let urlToUse = errorResult.url;
+                if (!isTopLevelDomain && errorResult.canonicalURL) {
+                    urlToUse = errorResult.canonicalURL;
+                }
                 const urlObj = new URL(urlToUse);
                 let filename = `${urlObj.hostname}${urlObj.pathname.replace(/\//g, '_')}${
                     urlObj.search ? '_' + urlObj.search.replace(/[?&=]/g, '_') : ''
@@ -1124,6 +1289,7 @@ if (require.main === module) {
     let adblockUrls = [];
     let debug = false;
     let useCache = true;
+    let timeout = 120000; // 預設 120 秒
 
     // 確保 URL 有 protocol
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
@@ -1139,6 +1305,12 @@ if (require.main === module) {
     const tokenIndex = args.indexOf('--ipinfo-token');
     if (tokenIndex !== -1 && args[tokenIndex + 1]) {
         token = args[tokenIndex + 1];
+    }
+
+    // 解析 timeout 參數
+    const timeoutIndex = args.indexOf('--timeout');
+    if (timeoutIndex !== -1 && args[timeoutIndex + 1]) {
+        timeout = parseInt(args[timeoutIndex + 1], 10) * 1000; // 轉換為毫秒
     }
 
     // 檢查是否要儲存結果
@@ -1176,6 +1348,7 @@ if (require.main === module) {
         console.error('  npm run check [--adblock-url url1,url2] https://example.com  # 使用自訂 adblock 清單');
         console.error('  npm run check [--debug] https://example.com  # 開啟 debug 模式，顯示詳細資訊');
         console.error('  npm run check [--no-cache] https://example.com  # 不使用快取，強制重新下載');
+        console.error('  npm run check [--timeout N] https://example.com  # 設定頁面載入 timeout（秒，預設 120）');
         process.exit(1);
     }
 
@@ -1187,7 +1360,8 @@ if (require.main === module) {
         useAdblock,
         adblockUrls,
         debug,
-        useCache
+        useCache,
+        timeout
     })
         .then(() => {
             console.log('檢測完成');
