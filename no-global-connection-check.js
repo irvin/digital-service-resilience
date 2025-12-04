@@ -21,13 +21,9 @@ const crypto = require('crypto');
 
 // 可忽略的域名列表（手動維護的）
 const MANUAL_IGNORABLE_DOMAINS = [
-    'fonts.gstatic.com',
-    'google-analytics.com',
-    'analytics.ahrefs.com',
-    'static.cloudflareinsights.com',
-    'static.hotjar.com',
-    '*.criteo.com',
-    '*.clarity.ms'
+    'fonts.gstatic.com'
+    // 'static.hotjar.com',
+    // '*.clarity.ms'
 ];
 
 // 台灣 ASN 列表 - 暫時不使用
@@ -191,8 +187,7 @@ async function loadAdblockLists(listUrls = [], options = {}) {
     const { useCache = true } = options;
     const cacheMaxAge = 24 * 60 * 60 * 1000; // 固定 24 小時
     const defaultLists = [
-        'https://easylist.to/easylist/easylist.txt',
-        'https://easylist.to/easylist/easyprivacy.txt'
+        'https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry/master/filters/filter_15_DnsFilter/filter.txt'
     ];
 
     const urls = listUrls.length > 0 ? listUrls : defaultLists;
