@@ -13,6 +13,7 @@ const { checkWebsiteResilience } = require('./no-global-connection-check');
 
 // 預設參數
 const DEFAULT_DELAY = 1000; // 每個請求之間的延遲（毫秒）
+const DEFAULT_CONCURRENCY = 4; // 預設並行度
 
 /**
  * 讀取網站清單
@@ -40,6 +41,7 @@ async function batchTest(options = {}) {
         limit = undefined,
         delayMs = DEFAULT_DELAY,
         startFrom = 0,
+        concurrency = DEFAULT_CONCURRENCY,
         save = true,
         customDNS = null,
         token = null,
@@ -59,6 +61,7 @@ async function batchTest(options = {}) {
     console.log('='.repeat(60));
     console.log(`測試清單: ${testListPath}`);
     console.log(`測試數量: ${limit !== undefined ? limit : '全部'}`);
+    console.log(`並行度: ${concurrency}`);
     console.log(`起始位置: ${startFrom}`);
     console.log(`請求延遲: ${delayMs}ms`);
     console.log('='.repeat(60));
@@ -85,85 +88,101 @@ async function batchTest(options = {}) {
         results: []
     };
 
-    // 開始測試
-    for (let i = 0; i < testTargets.length; i++) {
-        const website = testTargets[i];
-        const currentIndex = startFrom + i + 1;
-        const progress = `[${currentIndex}/${startFrom + testTargets.length}]`;
+    // 3. 以限制並行度的方式開始測試
+    const workerCount = Math.max(1, Math.min(concurrency, testTargets.length || 1));
+    console.log(`實際並行度: ${workerCount}`);
 
-        console.log('\n' + '-'.repeat(60));
-        console.log(`${progress} 測試: ${website.website}`);
-        console.log(`URL: ${website.url}`);
-        console.log(`排名:`, website.rank);
-        console.log('-'.repeat(60));
+    let currentIndex = 0;
 
-        try {
-            // 執行檢測，直接使用 checkWebsiteResilience 的儲存功能
-            const result = await checkWebsiteResilience(website.url, {
-                customDNS,
-                token,
-                save: save,
-                useAdblock,
-                adblockUrls,
-                useCache,
-                debug
-            });
+    async function runWorker(workerId) {
+        while (true) {
+            const i = currentIndex++;
+            if (i >= testTargets.length) break;
 
-            // 記錄統計
-            stats.success++;
-            stats.results.push({
-                website: website.website,
-                url: website.url,
-                rank: website.rank,
-                status: 'success',
-                result: {
-                    domestic: result.test_results?.domestic || 0,
-                    cloud: result.test_results?.cloud_w_domestic_node || 0,
-                    foreign: result.test_results?.foreign || 0
+            const website = testTargets[i];
+            const globalIndex = startFrom + i + 1;
+            const progress = `[${globalIndex}/${startFrom + testTargets.length}]`;
+
+            console.log('\n' + '-'.repeat(60));
+            console.log(`${progress} (Worker ${workerId}) 測試: ${website.website}`);
+            console.log(`URL: ${website.url}`);
+            console.log(`排名:`, website.rank);
+            console.log('-'.repeat(60));
+
+            try {
+                // 執行檢測，直接使用 checkWebsiteResilience 的儲存功能
+                const result = await checkWebsiteResilience(website.url, {
+                    customDNS,
+                    token,
+                    save: save,
+                    useAdblock,
+                    adblockUrls,
+                    useCache,
+                    debug
+                });
+
+                // 記錄統計
+                stats.success++;
+                stats.results.push({
+                    website: website.website,
+                    url: website.url,
+                    rank: website.rank,
+                    status: 'success',
+                    result: {
+                        domestic: result.test_results?.domestic || 0,
+                        cloud: result.test_results?.cloud_w_domestic_node || 0,
+                        foreign: result.test_results?.foreign || 0
+                    }
+                });
+
+                console.log(`✓ 測試完成 (Worker ${workerId}): O=${result.test_results?.domestic || 0}, ?=${result.test_results?.cloud_w_domestic_node || 0}, X=${result.test_results?.foreign || 0}`);
+            } catch (error) {
+                // 只要有 errorReason，就視為「測試錯誤」，其餘視為一般失敗
+                const errResult = error.result || error;
+                if (errResult?.errorReason) {
+                    console.log(`⚠ 測試錯誤 (Worker ${workerId}): ${errResult.errorReason}`);
+                    stats.errorSites.push({
+                        website: website.website,
+                        url: website.url,
+                        rank: website.rank,
+                        errorReason: errResult.errorReason,
+                        errorDetails: errResult.errorDetails
+                    });
+                    stats.results.push({
+                        website: website.website,
+                        url: website.url,
+                        rank: website.rank,
+                        status: 'error',
+                        errorReason: errResult.errorReason,
+                        errorDetails: errResult.errorDetails
+                    });
+                } else {
+                    console.error(`✗ 測試失敗 (Worker ${workerId}): ${error.message}`);
+                    stats.failed++;
+                    stats.results.push({
+                        website: website.website,
+                        url: website.url,
+                        rank: website.rank,
+                        status: 'failed',
+                        error: error.message
+                    });
                 }
-            });
+            }
 
-            console.log(`✓ 檢測完成: O=${result.test_results?.domestic || 0}, ?=${result.test_results?.cloud_w_domestic_node || 0}, X=${result.test_results?.foreign || 0}`);
-
-        } catch (error) {
-            // 只要有 errorReason，就視為「測試錯誤」，其餘視為一般失敗
-            const errResult = error.result || error;
-            if (errResult?.errorReason) {
-                console.log(`⚠ 測試錯誤: ${errResult.errorReason}`);
-                stats.errorSites.push({
-                    website: website.website,
-                    url: website.url,
-                    rank: website.rank,
-                    errorReason: errResult.errorReason,
-                    errorDetails: errResult.errorDetails
-                });
-                stats.results.push({
-                    website: website.website,
-                    url: website.url,
-                    rank: website.rank,
-                    status: 'error',
-                    errorReason: errResult.errorReason,
-                    errorDetails: errResult.errorDetails
-                });
-            } else {
-                console.error(`✗ 檢測失敗: ${error.message}`);
-                stats.failed++;
-                stats.results.push({
-                    website: website.website,
-                    url: website.url,
-                    rank: website.rank,
-                    status: 'failed',
-                    error: error.message
-                });
+            // 在每個 worker 的任務之間加入延遲（如果需要）
+            if (delayMs > 0 && i < testTargets.length - 1) {
+                console.log(`Worker ${workerId} 等待 ${delayMs}ms 後繼續...`);
+                await delay(delayMs);
             }
         }
-
-        // 如果不是最後一個，等待一段時間再繼續
-        if (i < testTargets.length - 1) {
-            console.log(`等待 ${delayMs}ms 後繼續...`);
-            await delay(delayMs);
-        }
     }
+
+    const workers = [];
+    for (let w = 0; w < workerCount; w++) {
+        workers.push(runWorker(w + 1));
+    }
+
+    await Promise.all(workers);
 
     // 輸出總結報告
     console.log('\n' + '='.repeat(60));
@@ -187,6 +206,7 @@ async function batchTest(options = {}) {
                 limit,
                 startFrom,
                 delayMs,
+                concurrency,
                 customDNS,
                 useAdblock,
                 adblockUrls,
@@ -231,6 +251,7 @@ if (require.main === module) {
     let limit = undefined;
     let startFrom = 0;
     let delayMs = DEFAULT_DELAY;
+    let concurrency = DEFAULT_CONCURRENCY;
     let customDNS = null;
     let token = null;
     let useAdblock = true;
@@ -254,6 +275,12 @@ if (require.main === module) {
     const delayIndex = args.indexOf('--delay');
     if (delayIndex !== -1 && args[delayIndex + 1]) {
         delayMs = parseInt(args[delayIndex + 1], 10);
+    }
+
+    // 解析 --concurrency
+    const concurrencyIndex = args.indexOf('--concurrency');
+    if (concurrencyIndex !== -1 && args.concurrencyIndex + 1) {
+        concurrency = parseInt(args[concurrencyIndex + 1], 10);
     }
 
     // 解析 --dns
@@ -306,6 +333,7 @@ if (require.main === module) {
         console.log('  --limit N              測試前 N 個網站（預設: 全部）');
         console.log('  --start-from N         從第 N 個網站開始（預設: 0）');
         console.log('  --delay N              每個請求之間的延遲，單位毫秒（預設: 1000）');
+        console.log('  --concurrency N        同時進行的最大測試數（預設: 4）');
         console.log('  --dns IP               使用自訂 DNS 伺服器');
         console.log('  --ipinfo-token TOKEN   指定 IPinfo API token');
         console.log('  --no-adblock           不使用 adblock 清單');
@@ -336,6 +364,7 @@ if (require.main === module) {
         limit,
         startFrom,
         delayMs,
+        concurrency,
         customDNS,
         token,
         useAdblock,
