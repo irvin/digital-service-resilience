@@ -12,7 +12,6 @@ const path = require('path');
 const { checkWebsiteResilience } = require('./no-global-connection-check');
 
 // 預設參數
-const DEFAULT_LIMIT = 100;
 const DEFAULT_DELAY = 1000; // 每個請求之間的延遲（毫秒）
 
 /**
@@ -38,7 +37,7 @@ function delay(ms) {
  */
 async function batchTest(options = {}) {
     const {
-        limit = DEFAULT_LIMIT,
+        limit = undefined,
         delayMs = DEFAULT_DELAY,
         startFrom = 0,
         save = true,
@@ -59,7 +58,7 @@ async function batchTest(options = {}) {
     console.log('批量韌性檢測開始');
     console.log('='.repeat(60));
     console.log(`測試清單: ${testListPath}`);
-    console.log(`測試數量: ${limit}`);
+    console.log(`測試數量: ${limit !== undefined ? limit : '全部'}`);
     console.log(`起始位置: ${startFrom}`);
     console.log(`請求延遲: ${delayMs}ms`);
     console.log('='.repeat(60));
@@ -70,8 +69,10 @@ async function batchTest(options = {}) {
     const websites = await loadWebsiteList(testListPath);
     console.log(`共找到 ${websites.length} 個網站\n`);
 
-    // 取得要測試的網站（從 startFrom 開始，取 limit 個）
-    const testTargets = websites.slice(startFrom, startFrom + limit);
+    // 取得要測試的網站（從 startFrom 開始，如果 limit 有指定則取 limit 個，否則測試全部）
+    const testTargets = limit !== undefined
+        ? websites.slice(startFrom, startFrom + limit)
+        : websites.slice(startFrom);
     console.log(`將測試 ${testTargets.length} 個網站\n`);
 
     // 統計資訊
@@ -227,7 +228,7 @@ if (require.main === module) {
     const args = process.argv.slice(2);
 
     // 解析命令列參數
-    let limit = DEFAULT_LIMIT;
+    let limit = undefined;
     let startFrom = 0;
     let delayMs = DEFAULT_DELAY;
     let customDNS = null;
@@ -302,7 +303,7 @@ if (require.main === module) {
         console.log('node batch-test.js [選項] <測試清單檔案路徑>');
         console.log('');
         console.log('選項:');
-        console.log('  --limit N              測試前 N 個網站（預設: 100）');
+        console.log('  --limit N              測試前 N 個網站（預設: 全部）');
         console.log('  --start-from N         從第 N 個網站開始（預設: 0）');
         console.log('  --delay N              每個請求之間的延遲，單位毫秒（預設: 1000）');
         console.log('  --dns IP               使用自訂 DNS 伺服器');
