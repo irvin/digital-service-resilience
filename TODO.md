@@ -1,0 +1,2 @@
+- [ ] 使用 IPinfo Core plan 紀錄 anycaast 狀態
+- [ ] 讀取其他瀏覽器儲存下來的 HAR 檔案
