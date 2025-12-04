@@ -4,3 +4,4 @@
 - [ ] 使用 IPinfo Core plan 紀錄 anycaast 狀態
 - [ ] 讀取其他瀏覽器儲存下來的 HAR 檔案
 - [ ] 前端測試結果頁面要能夠顯示測試錯誤
+- [ ] canonical URL 與原始 URL 不同的行為
