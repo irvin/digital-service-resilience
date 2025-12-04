@@ -153,9 +153,53 @@ $env:IPINFO_TOKEN="your_token_here"  # Windows PowerShell
 ```
 
 ### 使用方式
+
+#### 基本用法
 ```bash
-npm check https://example.com
+npm run check https://example.com
+# 或
 node no-global-connection-check.js https://example.com
+```
+
+#### 進階選項
+
+**使用自訂 DNS 伺服器**
+```bash
+node no-global-connection-check.js --dns 8.8.8.8 https://example.com
+```
+
+**儲存檢測結果**
+```bash
+node no-global-connection-check.js --save https://example.com
+```
+
+**指定 IPinfo Token**
+```bash
+node no-global-connection-check.js --ipinfo-token your_token https://example.com
+```
+
+**Adblock 清單選項**
+
+工具預設會自動載入 [EasyList](https://easylist.to/easylist/easylist.txt) 和 [EasyPrivacy](https://easylist.to/easylist/easyprivacy.txt) 清單，用於過濾廣告和追蹤相關的網域。
+
+- **使用預設 adblock 清單**（預設行為）：
+```bash
+node no-global-connection-check.js https://example.com
+```
+
+- **不使用 adblock 清單**：
+```bash
+node no-global-connection-check.js --no-adblock https://example.com
+```
+
+- **使用自訂 adblock 清單**：
+```bash
+node no-global-connection-check.js --adblock-url https://filter.futa.gg/hosts_abp.txt https://example.com
+```
+
+- **使用多個自訂清單**（用逗號分隔）：
+```bash
+node no-global-connection-check.js --adblock-url https://filter.futa.gg/hosts_abp.txt,https://filter.futa.gg/nofarm_abp.txt https://example.com
 ```
 
 ### 檢測結果說明
