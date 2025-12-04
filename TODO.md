@@ -1,0 +1,6 @@
+- [x] 把會被 cloudflare challenge 的網站標示為測試錯誤
+- [x] 如果清理後剩下 0 個域名，也標示為錯誤
+- [x] 將 batch 中錯誤的網站另存一份 json 檔案
+- [ ] 使用 IPinfo Core plan 紀錄 anycaast 狀態
+- [ ] 讀取其他瀏覽器儲存下來的 HAR 檔案
+- [ ] 前端測試結果頁面要能夠顯示測試錯誤

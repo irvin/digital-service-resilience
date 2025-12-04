@@ -153,9 +153,131 @@ $env:IPINFO_TOKEN="your_token_here"  # Windows PowerShell
 ```
 
 ### 使用方式
+
+#### 基本用法
 ```bash
-npm check https://example.com
+npm run check https://example.com
+# 或
 node no-global-connection-check.js https://example.com
+```
+
+#### 進階選項
+
+**使用自訂 DNS 伺服器**
+```bash
+node no-global-connection-check.js --dns 8.8.8.8 https://example.com
+```
+
+**儲存檢測結果**
+```bash
+node no-global-connection-check.js --save https://example.com
+```
+
+**指定 IPinfo Token**
+```bash
+node no-global-connection-check.js --ipinfo-token your_token https://example.com
+```
+
+**Adblock 清單選項**
+
+工具預設會自動載入 [EasyList](https://easylist.to/easylist/easylist.txt) 和 [EasyPrivacy](https://easylist.to/easylist/easyprivacy.txt) 清單，用於過濾廣告和追蹤相關的網域。
+
+- **使用預設 adblock 清單**（預設行為）：
+```bash
+node no-global-connection-check.js https://example.com
+```
+
+- **不使用 adblock 清單**：
+```bash
+node no-global-connection-check.js --no-adblock https://example.com
+```
+
+- **使用自訂 adblock 清單**：
+```bash
+node no-global-connection-check.js --adblock-url https://filter.futa.gg/hosts_abp.txt https://example.com
+```
+
+- **使用多個自訂清單**（用逗號分隔）：
+```bash
+node no-global-connection-check.js --adblock-url https://filter.futa.gg/hosts_abp.txt,https://filter.futa.gg/nofarm_abp.txt https://example.com
+```
+
+- **開啟 debug 模式**（顯示詳細資訊）：
+```bash
+node no-global-connection-check.js --debug https://example.com
+```
+
+Debug 模式會顯示：
+- 所有收集到的請求列表
+- 清理後的域名列表
+- 被忽略的域名列表
+- 每個域名的 IP 檢查過程
+- Adblock 清單載入資訊
+- 錯誤堆疊資訊（發生錯誤時）
+
+- **不使用快取**（強制重新下載 adblock 清單和 IPinfo 資料）：
+```bash
+node no-global-connection-check.js --no-cache https://example.com
+```
+
+### 批次測試
+
+使用 `batch-test.js` 可以批次測試多個網站。測試清單必須是 JSON 格式，包含 `website`、`url` 和 `rank` 欄位。
+
+#### 基本用法
+```bash
+node batch-test.js --limit 10 top-traffic-list-taiwan/merged_lists_tw.json
+```
+
+測試清單檔案路徑必須放在命令列的最後一個參數。
+
+#### 批次測試選項
+
+- **指定測試數量**：
+```bash
+node batch-test.js --limit 50 top-traffic-list-taiwan/merged_lists_tw.json
+```
+
+- **從指定位置開始測試**：
+```bash
+node batch-test.js --limit 50 --start-from 10 top-traffic-list-taiwan/merged_lists_tw.json
+```
+
+- **設定請求延遲**（單位：毫秒）：
+```bash
+node batch-test.js --delay 3000 --limit 10 top-traffic-list-taiwan/merged_lists_tw.json
+```
+
+- **組合使用多個參數與原始測試支援的參數 **：
+```bash
+node batch-test.js --debug --adblock-url https://filter.futa.gg/hosts_abp.txt --limit 10 --delay 2000 top-traffic-list-taiwan/merged_lists_tw.json
+```
+
+#### 批次測試結果
+
+批次測試會：
+1. 為每個網站產生獨立的檢測結果檔案，儲存在 `test_results/` 目錄
+2. 在根目錄產生總結報告 `batch_summary_<timestamp>.json`，包含：
+   - 測試參數
+   - 統計資訊（總數、成功、失敗、跳過）
+   - 所有測試結果摘要
+
+#### 測試清單格式
+
+測試清單 JSON 檔案格式如下：
+```json
+[
+  {
+    "website": "example.com",
+    "url": "https://example.com",
+    "rank": 1
+  },
+  {
+    "website": "another.com",
+    "url": "https://another.com",
+    "rank": 2
+  }
+]
 ```
 
 ### 檢測結果說明
