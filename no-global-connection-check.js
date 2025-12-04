@@ -300,11 +300,13 @@ async function collectHARAndCanonical(url) {
         // 訪問頁面並檢查響應狀態碼
         const response = await page.goto(url, { waitUntil: 'domcontentloaded' });
 
+        // 取得 HTTP 狀態碼
+        const httpStatus = response ? response.status() : null;
+
         // 檢查是否為 4xx 錯誤
-        if (response && response.status() >= 400 && response.status() < 500) {
-            const statusCode = response.status();
+        if (httpStatus && httpStatus >= 400 && httpStatus < 500) {
             const statusText = response.statusText();
-            throw new Error(`HTTP ${statusCode} ${statusText}`);
+            throw new Error(`HTTP ${httpStatus} ${statusText}`);
         }
 
         await page.waitForLoadState('networkidle');
@@ -328,7 +330,7 @@ async function collectHARAndCanonical(url) {
             }));
         });
 
-        return { requests, canonical };
+        return { requests, canonical, httpStatus };
     } finally {
         await browser.close();
     }
@@ -768,6 +770,7 @@ async function checkWebsiteResilience(url, options = {}) {
     let requests = [];
     let localIPInfo = null;
     let customDNS = null;
+    let httpStatus = null;
 
     try {
         // 初始化可忽略的域名列表（如果尚未初始化）
@@ -799,6 +802,7 @@ async function checkWebsiteResilience(url, options = {}) {
         const harResult = await collectHARAndCanonical(url);
         requests = harResult.requests || [];
         canonicalURL = harResult.canonical || null;
+        httpStatus = harResult.httpStatus || null;
 
         if (canonicalURL !== url) {
             console.log(`檢測到 canonical URL: ${canonicalURL}`);
@@ -954,6 +958,7 @@ async function checkWebsiteResilience(url, options = {}) {
         const result = {
             url: inputURL,           // 使用原始輸入的 URL
             canonicalURL,            // 保存實際訪問的 URL
+            httpStatus,              // HTTP 響應狀態碼
             timestamp: new Date().toISOString(),
             testParameters: {
                 customDNS: customDNS || null,
@@ -1026,6 +1031,9 @@ async function checkWebsiteResilience(url, options = {}) {
             const isHttp4xx = error.message && /^HTTP 4\d{2}/.test(error.message);
             const httpStatusMatch = error.message?.match(/^HTTP (\d{3})/);
 
+            // 如果有從錯誤訊息中提取的狀態碼，優先使用；否則使用已取得的 httpStatus
+            const errorHttpStatus = httpStatusMatch ? parseInt(httpStatusMatch[1], 10) : httpStatus;
+
             // 確保 URL 有 protocol（用於建立檔名）
             let urlForFilename = inputURL;
             if (urlForFilename && !urlForFilename.startsWith('http://') && !urlForFilename.startsWith('https://')) {
@@ -1035,6 +1043,7 @@ async function checkWebsiteResilience(url, options = {}) {
             errorResult = {
                 url: inputURL,
                 canonicalURL: canonicalURL || urlForFilename,
+                httpStatus: errorHttpStatus,
                 timestamp: new Date().toISOString(),
                 testParameters: {
                     customDNS: customDNS || null,
