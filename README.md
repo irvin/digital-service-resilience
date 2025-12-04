@@ -302,3 +302,12 @@ example.com: O (TW (HiNet))
 cdn.example.com: - (US (GOOGLE))
 api.example.com: X (US (Amazon))
 ```
+
+
+## 📜 授權
+
+This project is licensed under the CC0 1.0 Universal Public Domain Dedication. See the [LICENSE](/LICENSE) file for details.
+
+## 🙏 致謝
+
+This work was supported by a grant from the APNIC Foundation, via the Information Society Innovation Fund (ISIF Asia).
