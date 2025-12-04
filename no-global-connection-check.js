@@ -110,6 +110,17 @@ function getCacheFilePath(url) {
 }
 
 /**
+ * 取得 IPinfo 快取檔案路徑
+ * @param {string} ip - IP 地址
+ * @returns {string} 快取檔案路徑
+ */
+function getIPinfoCacheFilePath(ip) {
+    const cacheDir = path.join(__dirname, '.cache', 'ipinfo');
+    const fileName = getCacheFileName(ip);
+    return path.join(cacheDir, fileName);
+}
+
+/**
  * 檢查快取是否有效（預設 24 小時）
  * @param {string} cachePath - 快取檔案路徑
  * @param {number} maxAge - 最大年齡（毫秒），預設 24 小時
@@ -483,6 +494,39 @@ async function checkIPLocationWithAPI(domain, options = {}) {
             throw new Error(`無法獲取 ${domain} 的 IP 地址`);
         }
 
+        // 檢查快取選項
+        const useCache = options.useCache !== false;
+        const cacheMaxAge = options.cacheMaxAge || 24 * 60 * 60 * 1000; // 預設 24 小時
+        const cachePath = getIPinfoCacheFilePath(ip);
+
+        // 嘗試讀取快取
+        if (useCache) {
+            const isValid = await isCacheValid(cachePath, cacheMaxAge);
+            if (isValid) {
+                const cachedData = await readCache(cachePath);
+                if (cachedData) {
+                    try {
+                        const cachedResult = JSON.parse(cachedData);
+                        if (options.debug) {
+                            console.log(`[DEBUG] 使用快取 IPinfo 結果: ${ip}`);
+                        }
+                        return {
+                            source: 'json api (cached)',
+                            domain,
+                            ip,
+                            ...cachedResult
+                        };
+                    } catch {
+                        // 快取格式錯誤，繼續查詢
+                        if (options.debug) {
+                            console.log(`[DEBUG] 快取格式錯誤，重新查詢: ${ip}`);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 快取無效或不存在，從 API 查詢
         // 優先使用命令列參數的 token，其次使用環境變數
         const token = options.token || process.env.IPINFO_TOKEN;
         const url = token
@@ -495,14 +539,47 @@ async function checkIPLocationWithAPI(domain, options = {}) {
             }
         });
 
-        return {
+        const result = {
             source: 'json api',
             domain,
             ip,
             ...response.data
         };
+
+        // 儲存到快取
+        if (useCache) {
+            await writeCache(cachePath, JSON.stringify(response.data, null, 2));
+        }
+
+        return result;
     } catch (error) {
         console.error(`[API] 檢查 ${domain} 失敗:`, error.message);
+
+        // 如果查詢失敗，嘗試使用過期快取作為備用
+        if (options.useCache !== false) {
+            const ip = await getDomainIP(domain, options.customDNS);
+            if (ip) {
+                const cachePath = getIPinfoCacheFilePath(ip);
+                const cachedData = await readCache(cachePath);
+                if (cachedData) {
+                    try {
+                        const cachedResult = JSON.parse(cachedData);
+                        if (options.debug) {
+                            console.log(`[DEBUG] 使用過期快取 IPinfo 結果: ${ip}`);
+                        }
+                        return {
+                            source: 'json api (expired cache)',
+                            domain,
+                            ip,
+                            ...cachedResult
+                        };
+                    } catch {
+                        // 忽略快取解析錯誤
+                    }
+                }
+            }
+        }
+
         return {
             source: 'json api',
             domain,
@@ -512,8 +589,14 @@ async function checkIPLocationWithAPI(domain, options = {}) {
     }
 }
 
-async function checkIPLocation(domain, customDNS = null) {
-    const apiResult = await checkIPLocationWithAPI(domain, { customDNS });
+async function checkIPLocation(domain, customDNS = null, options = {}) {
+    const apiResult = await checkIPLocationWithAPI(domain, {
+        customDNS,
+        useCache: options.useCache !== false,
+        cacheMaxAge: options.cacheMaxAge,
+        token: options.token,
+        debug: options.debug
+    });
     return apiResult;
 }
 
@@ -721,9 +804,14 @@ async function checkWebsiteResilience(url, options = {}) {
                 if (options.debug) {
                     console.log(`[DEBUG] 檢查 ${domain}...`);
                 }
-                const result = await checkIPLocation(domain, customDNS);
+                const result = await checkIPLocation(domain, customDNS, {
+                    useCache: options.useCache !== false,
+                    cacheMaxAge: options.cacheMaxAge,
+                    token: options.token,
+                    debug: options.debug
+                });
                 if (options.debug) {
-                    console.log(`[DEBUG] ${domain}: ${result.ip || 'N/A'} (${result.country || 'N/A'})`);
+                    console.log(`[DEBUG] ${domain}: ${result.ip || 'N/A'} (${result.country || 'N/A'}) ${result.source?.includes('cached') ? '(快取)' : ''}`);
                 }
                 return result;
             })
