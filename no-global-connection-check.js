@@ -314,7 +314,7 @@ async function collectHARAndCanonical(url, options = {}) {
             throw new Error(`HTTP ${httpStatus} ${statusText}`);
         }
 
-        await page.waitForLoadState('networkidle', { timeout: timeout });
+        await page.waitForLoadState('load', { timeout: timeout });
 
         // 嘗試獲取 canonical URL
         const canonical = await page.evaluate((originalURL) => {
@@ -853,9 +853,14 @@ async function checkWebsiteResilience(url, options = {}) {
                     // 如果成功，更新 url 和 inputURL
                     url = wwwUrl;
                     inputURL = wwwUrl;
-                } catch {
-                    // 重試也失敗，拋出原始錯誤
-                    throw error;
+                } catch (retryError) {
+                    // 重試也失敗，更新 URL 為 www 版本，然後拋出重試時的錯誤
+                    const urlObj = new URL(url);
+                    urlObj.hostname = 'www.' + urlObj.hostname;
+                    const wwwUrl = urlObj.toString();
+                    url = wwwUrl;
+                    inputURL = wwwUrl;
+                    throw retryError;  // 拋出重試時的錯誤，而不是原始錯誤
                 }
             } else {
                 // 不符合重試條件，直接拋出錯誤
