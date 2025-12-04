@@ -215,6 +215,71 @@ Debug 模式會顯示：
 - Adblock 清單載入資訊
 - 錯誤堆疊資訊（發生錯誤時）
 
+- **不使用快取**（強制重新下載 adblock 清單和 IPinfo 資料）：
+```bash
+node no-global-connection-check.js --no-cache https://example.com
+```
+
+### 批次測試
+
+使用 `batch-test.js` 可以批次測試多個網站。測試清單必須是 JSON 格式，包含 `website`、`url` 和 `rank` 欄位。
+
+#### 基本用法
+```bash
+node batch-test.js --limit 10 top-traffic-list-taiwan/merged_lists_tw.json
+```
+
+測試清單檔案路徑必須放在命令列的最後一個參數。
+
+#### 批次測試選項
+
+- **指定測試數量**：
+```bash
+node batch-test.js --limit 50 top-traffic-list-taiwan/merged_lists_tw.json
+```
+
+- **從指定位置開始測試**：
+```bash
+node batch-test.js --limit 50 --start-from 10 top-traffic-list-taiwan/merged_lists_tw.json
+```
+
+- **設定請求延遲**（單位：毫秒）：
+```bash
+node batch-test.js --delay 3000 --limit 10 top-traffic-list-taiwan/merged_lists_tw.json
+```
+
+- **組合使用多個參數與原始測試支援的參數 **：
+```bash
+node batch-test.js --debug --adblock-url https://filter.futa.gg/hosts_abp.txt --limit 10 --delay 2000 top-traffic-list-taiwan/merged_lists_tw.json
+```
+
+#### 批次測試結果
+
+批次測試會：
+1. 為每個網站產生獨立的檢測結果檔案，儲存在 `test_results/` 目錄
+2. 在根目錄產生總結報告 `batch_summary_<timestamp>.json`，包含：
+   - 測試參數
+   - 統計資訊（總數、成功、失敗、跳過）
+   - 所有測試結果摘要
+
+#### 測試清單格式
+
+測試清單 JSON 檔案格式如下：
+```json
+[
+  {
+    "website": "example.com",
+    "url": "https://example.com",
+    "rank": 1
+  },
+  {
+    "website": "another.com",
+    "url": "https://another.com",
+    "rank": 2
+  }
+]
+```
+
 ### 檢測結果說明
 - O：服務位於台灣境內
 - ?：使用具有台灣節點的雲端服務（如 Google Cloud、AWS 等）

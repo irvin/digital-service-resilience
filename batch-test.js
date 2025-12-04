@@ -1,0 +1,315 @@
+#!/usr/bin/env node
+
+/**
+ * 批量測試腳本
+ * 讀取指定的網站清單 JSON 檔案
+ * 並針對前 N 個網站進行韌性檢測
+ */
+
+require('dotenv').config();
+const fs = require('fs').promises;
+const path = require('path');
+const { checkWebsiteResilience } = require('./no-global-connection-check');
+
+// 預設參數
+const DEFAULT_LIMIT = 100;
+const DEFAULT_DELAY = 1000; // 每個請求之間的延遲（毫秒）
+
+/**
+ * 讀取網站清單
+ */
+async function loadWebsiteList(testListPath) {
+    const filePath = path.isAbsolute(testListPath)
+        ? testListPath
+        : path.join(__dirname, testListPath);
+    const data = await fs.readFile(filePath, 'utf-8');
+    return JSON.parse(data);
+}
+
+/**
+ * 延遲函數
+ */
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * 批量測試網站
+ */
+async function batchTest(options = {}) {
+    const {
+        limit = DEFAULT_LIMIT,
+        delayMs = DEFAULT_DELAY,
+        startFrom = 0,
+        save = true,
+        customDNS = null,
+        token = null,
+        useAdblock = true,
+        adblockUrls = [],
+        useCache = true,
+        testListPath,
+        debug = false
+    } = options;
+
+    if (!testListPath) {
+        throw new Error('必須提供測試清單檔案路徑');
+    }
+
+    console.log('='.repeat(60));
+    console.log('批量韌性檢測開始');
+    console.log('='.repeat(60));
+    console.log(`測試清單: ${testListPath}`);
+    console.log(`測試數量: ${limit}`);
+    console.log(`起始位置: ${startFrom}`);
+    console.log(`請求延遲: ${delayMs}ms`);
+    console.log('='.repeat(60));
+    console.log('');
+
+    // 讀取網站清單
+    console.log('正在讀取網站清單...');
+    const websites = await loadWebsiteList(testListPath);
+    console.log(`共找到 ${websites.length} 個網站\n`);
+
+    // 取得要測試的網站（從 startFrom 開始，取 limit 個）
+    const testTargets = websites.slice(startFrom, startFrom + limit);
+    console.log(`將測試 ${testTargets.length} 個網站\n`);
+
+    // 統計資訊
+    const stats = {
+        total: testTargets.length,
+        success: 0,
+        failed: 0,
+        skipped: 0,
+        results: []
+    };
+
+    // 開始測試
+    for (let i = 0; i < testTargets.length; i++) {
+        const website = testTargets[i];
+        const currentIndex = startFrom + i + 1;
+        const progress = `[${currentIndex}/${startFrom + testTargets.length}]`;
+
+        console.log('\n' + '-'.repeat(60));
+        console.log(`${progress} 測試: ${website.website}`);
+        console.log(`URL: ${website.url}`);
+        console.log(`排名:`, website.rank);
+        console.log('-'.repeat(60));
+
+        try {
+            // 執行檢測，直接使用 checkWebsiteResilience 的儲存功能
+            const result = await checkWebsiteResilience(website.url, {
+                customDNS,
+                token,
+                save: save,
+                useAdblock,
+                adblockUrls,
+                useCache,
+                debug
+            });
+
+            // 記錄統計
+            stats.success++;
+            stats.results.push({
+                website: website.website,
+                url: website.url,
+                rank: website.rank,
+                status: 'success',
+                result: {
+                    domestic: result.test_results?.domestic || 0,
+                    cloud: result.test_results?.cloud_w_domestic_node || 0,
+                    foreign: result.test_results?.foreign || 0
+                }
+            });
+
+            console.log(`✓ 檢測完成: O=${result.test_results?.domestic || 0}, ?=${result.test_results?.cloud_w_domestic_node || 0}, X=${result.test_results?.foreign || 0}`);
+
+        } catch (error) {
+            console.error(`✗ 檢測失敗: ${error.message}`);
+            stats.failed++;
+            stats.results.push({
+                website: website.website,
+                url: website.url,
+                rank: website.rank,
+                status: 'failed',
+                error: error.message
+            });
+        }
+
+        // 如果不是最後一個，等待一段時間再繼續
+        if (i < testTargets.length - 1) {
+            console.log(`等待 ${delayMs}ms 後繼續...`);
+            await delay(delayMs);
+        }
+    }
+
+    // 輸出總結報告
+    console.log('\n' + '='.repeat(60));
+    console.log('批量檢測完成');
+    console.log('='.repeat(60));
+    console.log(`總數: ${stats.total}`);
+    console.log(`成功: ${stats.success}`);
+    console.log(`失敗: ${stats.failed}`);
+    console.log(`跳過: ${stats.skipped}`);
+    console.log('='.repeat(60));
+
+    // 儲存總結報告
+    if (save) {
+        const summaryPath = `batch_summary_${Date.now()}.json`;
+        const summary = {
+            timestamp: new Date().toISOString(),
+            options: {
+                testListPath,
+                limit,
+                startFrom,
+                delayMs,
+                customDNS,
+                useAdblock,
+                adblockUrls,
+                useCache
+            },
+            statistics: {
+                total: stats.total,
+                success: stats.success,
+                failed: stats.failed,
+                skipped: stats.skipped
+            },
+            results: stats.results
+        };
+
+        await fs.writeFile(summaryPath, JSON.stringify(summary, null, 2));
+        console.log(`\n總結報告已儲存: ${summaryPath}`);
+    }
+
+    return stats;
+}
+
+// 如果直接執行此檔案
+if (require.main === module) {
+    const args = process.argv.slice(2);
+
+    // 解析命令列參數
+    let limit = DEFAULT_LIMIT;
+    let startFrom = 0;
+    let delayMs = DEFAULT_DELAY;
+    let customDNS = null;
+    let token = null;
+    let useAdblock = true;
+    let adblockUrls = [];
+    let useCache = true;
+    let debug = false;
+
+    // 解析 --limit
+    const limitIndex = args.indexOf('--limit');
+    if (limitIndex !== -1 && args[limitIndex + 1]) {
+        limit = parseInt(args[limitIndex + 1], 10);
+    }
+
+    // 解析 --start-from
+    const startIndex = args.indexOf('--start-from');
+    if (startIndex !== -1 && args[startIndex + 1]) {
+        startFrom = parseInt(args[startIndex + 1], 10);
+    }
+
+    // 解析 --delay
+    const delayIndex = args.indexOf('--delay');
+    if (delayIndex !== -1 && args[delayIndex + 1]) {
+        delayMs = parseInt(args[delayIndex + 1], 10);
+    }
+
+    // 解析 --dns
+    const dnsIndex = args.indexOf('--dns');
+    if (dnsIndex !== -1 && args[dnsIndex + 1]) {
+        customDNS = args[dnsIndex + 1];
+    }
+
+    // 解析 --ipinfo-token
+    const tokenIndex = args.indexOf('--ipinfo-token');
+    if (tokenIndex !== -1 && args[tokenIndex + 1]) {
+        token = args[tokenIndex + 1];
+    }
+
+    // 解析 --no-adblock
+    if (args.includes('--no-adblock')) {
+        useAdblock = false;
+    }
+
+    // 解析 --adblock-url
+    const adblockUrlIndex = args.indexOf('--adblock-url');
+    if (adblockUrlIndex !== -1 && args[adblockUrlIndex + 1]) {
+        adblockUrls = args[adblockUrlIndex + 1].split(',').map(u => u.trim());
+    }
+
+    // 解析 --no-cache
+    if (args.includes('--no-cache')) {
+        useCache = false;
+    }
+
+    // 解析 --debug
+    debug = args.includes('--debug');
+
+    // 從最後一個參數讀取測試清單路徑（必須不是以 -- 開頭的選項）
+    let testListPath = null;
+    for (let i = args.length - 1; i >= 0; i--) {
+        if (!args[i].startsWith('--')) {
+            testListPath = args[i];
+            break;
+        }
+    }
+
+    // 顯示使用說明
+    if (args.includes('--help') || args.includes('-h')) {
+        console.log('批量測試腳本使用方式:');
+        console.log('');
+        console.log('node batch-test.js [選項] <測試清單檔案路徑>');
+        console.log('');
+        console.log('選項:');
+        console.log('  --limit N              測試前 N 個網站（預設: 100）');
+        console.log('  --start-from N         從第 N 個網站開始（預設: 0）');
+        console.log('  --delay N              每個請求之間的延遲，單位毫秒（預設: 1000）');
+        console.log('  --dns IP               使用自訂 DNS 伺服器');
+        console.log('  --ipinfo-token TOKEN   指定 IPinfo API token');
+        console.log('  --no-adblock           不使用 adblock 清單');
+        console.log('  --adblock-url URL      使用自訂 adblock 清單 URL（可用逗號分隔多個）');
+        console.log('  --no-cache             不使用快取，強制重新下載');
+        console.log('  --debug                開啟 debug 模式，顯示詳細資訊');
+        console.log('  --help, -h             顯示此說明');
+        console.log('');
+        console.log('範例:');
+        console.log('  node batch-test.js --limit 10 top-traffic-list-taiwan/merged_lists_tw.json');
+        console.log('  node batch-test.js --limit 50 --start-from 10 --delay 3000 top-traffic-list-taiwan/merged_lists_tw.json');
+        console.log('  node batch-test.js --limit 100 --dns 8.8.8.8 --ipinfo-token your_token top-traffic-list-taiwan/merged_lists_tw.json');
+        console.log('  node batch-test.js --debug --adblock-url https://filter.futa.gg/hosts_abp.txt --limit 10 top-traffic-list-taiwan/merged_lists_tw.json');
+        process.exit(0);
+    }
+
+    // 檢查是否提供了測試清單路徑
+    if (!testListPath) {
+        console.error('錯誤: 必須提供測試清單檔案路徑');
+        console.error('');
+        console.error('使用方式: node batch-test.js [選項] <測試清單檔案路徑>');
+        console.error('使用 --help 或 -h 查看詳細說明');
+        process.exit(1);
+    }
+
+    // 執行批量測試
+    batchTest({
+        limit,
+        startFrom,
+        delayMs,
+        customDNS,
+        token,
+        useAdblock,
+        adblockUrls,
+        useCache,
+        testListPath,
+        debug
+    }).catch(error => {
+        console.error('批量測試失敗:', error);
+        if (debug) {
+            console.error('錯誤堆疊:', error.stack);
+        }
+        process.exit(1);
+    });
+}
+
+module.exports = { batchTest };
