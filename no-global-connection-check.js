@@ -297,8 +297,16 @@ async function collectHARAndCanonical(url) {
         // 開始收集 HAR
         await context.tracing.start({ snapshots: true, screenshots: true });
 
-        // 訪問頁面
-        await page.goto(url);
+        // 訪問頁面並檢查響應狀態碼
+        const response = await page.goto(url, { waitUntil: 'domcontentloaded' });
+
+        // 檢查是否為 4xx 錯誤
+        if (response && response.status() >= 400 && response.status() < 500) {
+            const statusCode = response.status();
+            const statusText = response.statusText();
+            throw new Error(`HTTP ${statusCode} ${statusText}`);
+        }
+
         await page.waitForLoadState('networkidle');
 
         // 嘗試獲取 canonical URL
@@ -1014,6 +1022,9 @@ async function checkWebsiteResilience(url, options = {}) {
         } else {
             // 為其他錯誤建立結果物件
             const isTimeout = error.name === 'TimeoutError';
+            // 檢查是否為 HTTP 4xx 錯誤
+            const isHttp4xx = error.message && /^HTTP 4\d{2}/.test(error.message);
+            const httpStatusMatch = error.message?.match(/^HTTP (\d{3})/);
 
             // 確保 URL 有 protocol（用於建立檔名）
             let urlForFilename = inputURL;
@@ -1040,10 +1051,15 @@ async function checkWebsiteResilience(url, options = {}) {
                 requestCount: requests ? requests.length : 0,
                 uniqueDomains: 0,
                 testError: true,
-                errorReason: isTimeout ? 'Timeout' : `Error: ${error.name || 'Unknown'}`,
+                errorReason: isHttp4xx
+                    ? `HTTP ${httpStatusMatch ? httpStatusMatch[1] : '4xx'} Error`
+                    : isTimeout
+                        ? 'Timeout'
+                        : `Error: ${error.name || 'Unknown'}`,
                 errorDetails: {
                     message: error.message,
                     name: error.name,
+                    statusCode: httpStatusMatch ? httpStatusMatch[1] : null,
                     stack: error.stack
                 }
             };
