@@ -22,6 +22,8 @@ const crypto = require('crypto');
 // 可忽略的域名列表（手動維護的）
 const MANUAL_IGNORABLE_DOMAINS = [
     'fonts.gstatic.com'
+    // 'static.hotjar.com',
+    // '*.clarity.ms'
 ];
 
 // 台灣 ASN 列表 - 暫時不使用
@@ -45,7 +47,6 @@ const CLOUD_PROVIDERS = [
 
 // 動態載入的 adblock 清單域名（會在初始化時載入）
 let ADBLOCK_DOMAINS = new Set();
-let IGNORABLE_DOMAINS = [...MANUAL_IGNORABLE_DOMAINS];
 
 /**
  * 解析 adblock 規則，提取域名
@@ -185,8 +186,7 @@ async function loadAdblockLists(listUrls = [], options = {}) {
     const { useCache = true } = options;
     const cacheMaxAge = 24 * 60 * 60 * 1000; // 固定 24 小時
     const defaultLists = [
-        'https://easylist.to/easylist/easylist.txt',
-        'https://easylist.to/easylist/easyprivacy.txt'
+        'https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry/master/filters/filter_15_DnsFilter/filter.txt'
     ];
 
     const urls = listUrls.length > 0 ? listUrls : defaultLists;
@@ -277,8 +277,6 @@ async function initializeIgnorableDomains(options = {}) {
     if (useAdblock) {
         try {
             ADBLOCK_DOMAINS = await loadAdblockLists(adblockUrls, { useCache });
-            // 將 adblock 域名加入可忽略列表
-            IGNORABLE_DOMAINS.push(...Array.from(ADBLOCK_DOMAINS));
             console.log(`已載入 ${ADBLOCK_DOMAINS.size} 個 adblock 域名規則`);
         } catch (error) {
             console.warn('載入 adblock 清單失敗，使用預設清單:', error.message);
@@ -379,8 +377,19 @@ function shouldIgnoreDomain(hostname, targetHostname = null) {
         }
     }
 
-    // 檢查手動維護的清單（使用 includes 以支援部分匹配）
-    const matchedManualDomain = MANUAL_IGNORABLE_DOMAINS.find(domain => hostname.includes(domain));
+    // 檢查手動維護的清單，支援一般字串與萬用字元（例如 *.example.com）
+    const matchedManualDomain = MANUAL_IGNORABLE_DOMAINS.find(domainPattern => {
+        if (!domainPattern) return false;
+
+        // 萬用字元前綴：*.example.com → 匹配 example.com 以及任何其子網域
+        if (domainPattern.startsWith('*.')) {
+            const base = domainPattern.slice(2); // 去掉 "*."
+            return hostname === base || hostname.endsWith(`.${base}`);
+        }
+
+        // 一般情況維持原本的 includes 行為
+        return hostname.includes(domainPattern);
+    });
     if (matchedManualDomain) {
         return true;
     }
@@ -418,8 +427,17 @@ function getIgnoreReason(hostname, targetHostname = null) {
         }
     }
 
-    // 檢查手動維護的清單
-    const matchedManualDomain = MANUAL_IGNORABLE_DOMAINS.find(domain => hostname.includes(domain));
+    // 檢查手動維護的清單（支援萬用字元）
+    const matchedManualDomain = MANUAL_IGNORABLE_DOMAINS.find(domainPattern => {
+        if (!domainPattern) return false;
+
+        if (domainPattern.startsWith('*.')) {
+            const base = domainPattern.slice(2);
+            return hostname === base || hostname.endsWith(`.${base}`);
+        }
+
+        return hostname.includes(domainPattern);
+    });
     if (matchedManualDomain) {
         return `手動維護清單（匹配: ${matchedManualDomain}）`;
     }
@@ -736,6 +754,13 @@ function formatDomainDetail(result, cleanedData, resilience) {
 }
 
 async function checkWebsiteResilience(url, options = {}) {
+    // 在函數開始時初始化變數，以便在 catch 區塊中使用
+    let inputURL = url;
+    let canonicalURL = null;
+    let requests = [];
+    let localIPInfo = null;
+    let customDNS = null;
+
     try {
         // 初始化可忽略的域名列表（如果尚未初始化）
         if (ADBLOCK_DOMAINS.size === 0 && options.useAdblock !== false) {
@@ -753,7 +778,7 @@ async function checkWebsiteResilience(url, options = {}) {
         }
 
         // 保存原始輸入的 URL
-        const inputURL = url;
+        inputURL = url;
 
         // 確保 URL 有 protocol
         if (!url.startsWith('http://') && !url.startsWith('https://')) {
@@ -763,7 +788,9 @@ async function checkWebsiteResilience(url, options = {}) {
         console.log(`開始檢測網站: ${url}`);
 
         // 1. 收集 connections 和 canonical URL
-        const { requests, canonical: canonicalURL } = await collectHARAndCanonical(url);
+        const harResult = await collectHARAndCanonical(url);
+        requests = harResult.requests || [];
+        canonicalURL = harResult.canonical || null;
 
         if (canonicalURL !== url) {
             console.log(`檢測到 canonical URL: ${canonicalURL}`);
@@ -782,12 +809,12 @@ async function checkWebsiteResilience(url, options = {}) {
 
         // 使用環境變數中的 DNS（如果有指定的話）
         const envDNS = process.env.DEFAULT_DNS;
-        const customDNS = options.customDNS || envDNS;
+        customDNS = options.customDNS || envDNS;
 
         // 取得測試環境資訊
-        const localIPInfo = await getLocalIPInfo(options);
-        if (!localIPInfo.error) {
-            console.log('\n測試環境資訊:');
+        localIPInfo = await getLocalIPInfo(options);
+        if (options.debug && !localIPInfo.error) {
+            console.log('\n[DEBUG] 測試環境資訊:');
             console.log('-------------------');
             console.log(localIPInfo);
         }
@@ -906,12 +933,14 @@ async function checkWebsiteResilience(url, options = {}) {
         console.log(`有國內節點的雲端服務 (?): ${resilience.cloud}`);
         console.log(`境外服務 (X): ${resilience.foreign}`);
 
-        console.log('\n詳細資訊:');
-        console.log('-------------------');
-        locationResults.forEach(result => {
-            console.log(`\n${result.domain}:`);
-            console.log(formatDomainDetail(result, cleanedData, resilience));
-        });
+        if (options.debug) {
+            console.log('\n[DEBUG] 詳細域名資訊:');
+            console.log('-------------------');
+            locationResults.forEach(result => {
+                console.log(`\n${result.domain}:`);
+                console.log(formatDomainDetail(result, cleanedData, resilience));
+            });
+        }
 
         // 準備結果資料
         const result = {
@@ -976,43 +1005,85 @@ async function checkWebsiteResilience(url, options = {}) {
 
         return result;
     } catch (error) {
-        // 如果是有 errorReason 的測試錯誤（Cloudflare Challenge 或零域名等），寫入錯誤資訊到 JSON
+        // 統一把所有錯誤視為測試錯誤，建立包含 errorReason 的結果物件
+        let errorResult = null;
+
+        // 如果錯誤已經有 result（CloudflareChallengeError 或 ZeroRequestError），直接使用
         if ((error instanceof CloudflareChallengeError || error instanceof ZeroRequestError) && error.result) {
-            console.error(`檢測到測試錯誤: ${error.result.errorReason || error.message}`);
+            errorResult = error.result;
+        } else {
+            // 為其他錯誤建立結果物件
+            const isTimeout = error.name === 'TimeoutError';
 
-            if (options.save) {
-                try {
-                    // 確保目錄存在
-                    await fs.mkdir('test_results', { recursive: true });
-
-                    // 從錯誤結果中取得 URL 資訊
-                    const urlToUse = error.result.canonicalURL || error.result.url;
-                    const urlObj = new URL(urlToUse);
-                    let filename = `${urlObj.hostname}${urlObj.pathname.replace(/\//g, '_')}${
-                        urlObj.search ? '_' + urlObj.search.replace(/[?&=]/g, '_') : ''
-                    }`.replace(/_+$/, '');
-
-                    // 如果檔名太長，直接截斷到 95 字元（預留 .error.json 的空間）
-                    if (filename.length > 95) {
-                        filename = filename.slice(0, 95);
-                    }
-
-                    const outputPath = path.resolve(`test_results/${filename}.error.json`);
-
-                    // 儲存包含錯誤資訊的結果
-                    await fs.writeFile(outputPath, JSON.stringify(error.result, null, 2));
-                    console.log(`\n錯誤結果已儲存至: ${outputPath}`);
-                } catch (saveError) {
-                    console.error('無法儲存錯誤結果:', saveError.message);
-                }
+            // 確保 URL 有 protocol（用於建立檔名）
+            let urlForFilename = inputURL;
+            if (urlForFilename && !urlForFilename.startsWith('http://') && !urlForFilename.startsWith('https://')) {
+                urlForFilename = 'https://' + urlForFilename;
             }
 
-            // 重新拋出錯誤，讓上層處理
-            throw error;
-        } else {
-            console.error('檢測過程發生錯誤:', error);
-            throw error;
+            errorResult = {
+                url: inputURL,
+                canonicalURL: canonicalURL || urlForFilename,
+                timestamp: new Date().toISOString(),
+                testParameters: {
+                    customDNS: customDNS || null,
+                    useAdblock: options.useAdblock !== false,
+                    adblockUrls: options.adblockUrls || [],
+                    useCache: options.useCache !== false,
+                    hasIPinfoToken: !!(options.token || process.env.IPINFO_TOKEN)
+                },
+                testingEnvironment: localIPInfo && !localIPInfo.error ? {
+                    ip: localIPInfo.ip,
+                    ...localIPInfo,
+                    dnsServer: customDNS || (dns.getServers().length > 0 ? dns.getServers()[0] : null)
+                } : null,
+                requestCount: requests ? requests.length : 0,
+                uniqueDomains: 0,
+                testError: true,
+                errorReason: isTimeout ? 'Timeout' : `Error: ${error.name || 'Unknown'}`,
+                errorDetails: {
+                    message: error.message,
+                    name: error.name,
+                    stack: error.stack
+                }
+            };
         }
+
+        console.error(`檢測到測試錯誤: ${errorResult.errorReason || error.message}`);
+
+        // 將 result 附加到 error 物件上，讓 batch-test.js 可以讀取
+        error.result = errorResult;
+
+        // 儲存錯誤結果到 JSON 檔案
+        if (options.save) {
+            try {
+                // 確保目錄存在
+                await fs.mkdir('test_results', { recursive: true });
+
+                // 從錯誤結果中取得 URL 資訊
+                const urlToUse = errorResult.canonicalURL || errorResult.url;
+                const urlObj = new URL(urlToUse);
+                let filename = `${urlObj.hostname}${urlObj.pathname.replace(/\//g, '_')}${
+                    urlObj.search ? '_' + urlObj.search.replace(/[?&=]/g, '_') : ''
+                }`.replace(/_+$/, '');
+
+                // 如果檔名太長，直接截斷到 95 字元（預留 .error.json 的空間）
+                if (filename.length > 95) {
+                    filename = filename.slice(0, 95);
+                }
+
+                const outputPath = path.resolve(`test_results/${filename}.error.json`);
+
+                // 儲存包含錯誤資訊的結果
+                await fs.writeFile(outputPath, JSON.stringify(errorResult, null, 2));
+                console.log(`\n錯誤結果已儲存至: ${outputPath}`);
+            } catch (saveError) {
+                console.error('無法儲存錯誤結果:', saveError.message);
+            }
+        }
+
+        // 重新拋出錯誤，讓上層處理
+        throw error;
     }
 }
 
