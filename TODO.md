@@ -10,3 +10,4 @@
 - [ ] batch processing 加入平行測試
 - [ ] MANUAL_IGNORABLE_DOMAINS 加入 * 的支援
 - [ ] Fastly 有台灣節點嗎？
+- [x] 有些網站沒有 www 就會錯誤（例如：chiayi.gov.tw）

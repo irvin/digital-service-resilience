@@ -809,10 +809,58 @@ async function checkWebsiteResilience(url, options = {}) {
         console.log(`開始檢測網站: ${url}`);
 
         // 1. 收集 connections 和 canonical URL
-        const harResult = await collectHARAndCanonical(url);
+        let harResult = null;
+        let retriedWithWww = false;
+
+        try {
+            harResult = await collectHARAndCanonical(url);
+        } catch (error) {
+            // 檢查是否為 DNS/網路錯誤，且原始 URL 沒有 www. 前綴
+            const isDnsError = error.message && (error.message.includes('ERR_NAME_NOT_RESOLVED'));
+
+            // 檢查原始 URL 是否沒有 www. 前綴
+            let shouldRetryWithWww = false;
+            try {
+                const urlObj = new URL(url);
+                const hostname = urlObj.hostname;
+                if (!hostname.startsWith('www.') && isDnsError) {
+                    shouldRetryWithWww = true;
+                }
+            } catch {
+                // URL 解析失敗，不重試
+            }
+
+            if (shouldRetryWithWww) {
+                // 嘗試加上 www. 前綴
+                try {
+                    const urlObj = new URL(url);
+                    urlObj.hostname = 'www.' + urlObj.hostname;
+                    const wwwUrl = urlObj.toString();
+
+                    console.log(`DNS 解析失敗，嘗試使用 www. 版本: ${wwwUrl}`);
+                    retriedWithWww = true;
+
+                    harResult = await collectHARAndCanonical(wwwUrl);
+                    // 如果成功，更新 url 和 inputURL
+                    url = wwwUrl;
+                    inputURL = wwwUrl;
+                } catch {
+                    // 重試也失敗，拋出原始錯誤
+                    throw error;
+                }
+            } else {
+                // 不符合重試條件，直接拋出錯誤
+                throw error;
+            }
+        }
+
         requests = harResult.requests || [];
         canonicalURL = harResult.canonical || null;
         httpStatus = harResult.httpStatus || null;
+
+        if (retriedWithWww) {
+            console.log(`成功使用 www. 版本進行測試`);
+        }
 
         if (canonicalURL && canonicalURL !== url) {
             console.log(`檢測到 canonical URL: ${canonicalURL}`);
