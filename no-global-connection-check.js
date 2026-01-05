@@ -26,6 +26,10 @@ const MANUAL_IGNORABLE_DOMAINS = [
     // '*.clarity.ms'
 ];
 
+const DEFAULT_ADBLOCK_LISTS = [
+    'https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry/master/filters/filter_15_DnsFilter/filter.txt'
+];
+
 const CLOUD_PROVIDERS_DATA_PATH = path.join(
     __dirname,
     'top-traffic-list-taiwan',
@@ -239,11 +243,8 @@ async function writeCache(cachePath, content) {
 async function loadAdblockLists(listUrls = [], options = {}) {
     const { useCache = true } = options;
     const cacheMaxAge = 24 * 60 * 60 * 1000; // 固定 24 小時
-    const defaultLists = [
-        'https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry/master/filters/filter_15_DnsFilter/filter.txt'
-    ];
 
-    const urls = listUrls.length > 0 ? listUrls : defaultLists;
+    const urls = listUrls.length > 0 ? listUrls : DEFAULT_ADBLOCK_LISTS;
     const allDomains = new Set();
 
     for (const url of urls) {
@@ -309,6 +310,11 @@ async function loadAdblockLists(listUrls = [], options = {}) {
     }
 
     return allDomains;
+}
+
+function getAdblockUrlsForResult(options = {}) {
+    const list = Array.isArray(options.adblockUrls) ? options.adblockUrls : [];
+    return list.length > 0 ? list : DEFAULT_ADBLOCK_LISTS;
 }
 
 /**
@@ -1063,7 +1069,7 @@ async function checkWebsiteResilience(url, options = {}) {
                 testParameters: {
                     customDNS: customDNS || null,
                     useAdblock: options.useAdblock !== false,
-                    adblockUrls: options.adblockUrls || [],
+                    adblockUrls: getAdblockUrlsForResult(options),
                     useCache: options.useCache !== false,
                     hasIPinfoToken: !!(options.token || process.env.IPINFO_TOKEN)
                 },
@@ -1172,7 +1178,7 @@ async function checkWebsiteResilience(url, options = {}) {
             testParameters: {
                 customDNS: customDNS || null,
                 useAdblock: options.useAdblock !== false,
-                adblockUrls: options.adblockUrls || [],
+                adblockUrls: getAdblockUrlsForResult(options),
                 useCache: options.useCache !== false,
                 hasIPinfoToken: !!(options.token || process.env.IPINFO_TOKEN)
             },
@@ -1261,7 +1267,7 @@ async function checkWebsiteResilience(url, options = {}) {
                 testParameters: {
                     customDNS: customDNS || null,
                     useAdblock: options.useAdblock !== false,
-                    adblockUrls: options.adblockUrls || [],
+                    adblockUrls: getAdblockUrlsForResult(options),
                     useCache: options.useCache !== false,
                     hasIPinfoToken: !!(options.token || process.env.IPINFO_TOKEN)
                 },
