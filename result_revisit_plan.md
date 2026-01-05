@@ -1,11 +1,20 @@
 # 計畫
+- 規劃雲端判斷維護策略：移除程式內建的 `CLOUD_PROVIDERS`，讀取 top-traffic-list-taiwan/cloud_providers_tw.json 作為資料來源
+- 更新結果結構（境內 / 境外 x 雲端 / 非雲端）。
+  
+    "test_results": {
+      "domestic": {
+        "clouds": 1,
+        "others": 1
+      }
+      "foreign": {
+        "clouds": 1,
+        "others": 1
+    }
 
-- 定義新的結果結構（雲端 / 非雲端 × 境內 / 境外）。
-- 明確分類規則：`org` 或 `country` 缺失時的歸類方式（例如 `unknown` 或預設境外）。
-- 規劃雲端判斷維護策略：是否擴充 `CLOUD_PROVIDERS` 或外部化設定。
-- 盤點雲端服務資料來源與建立方式（ASN/IP 範圍、PeeringDB、RIR/BGP），並規劃更新頻率與版本化。
-- 決定相容策略：保留舊的 `O/?/X` 欄位或提供轉換映射給下游。
-- 補一段新結構的 JSON 範例，方便對齊輸出預期。
 - 更新 `calculateResilience`，計算新的矩陣並保留每個網域的細節。
+
+TODO:
+- 決定相容策略：保留舊的 `O/?/X` 欄位或提供轉換映射給下游。
 - 更新結果輸出結構（`test_results`、`domainDetails`）與相依讀取結果的地方。
 - 以既有測試結果驗證（含 Cloudflare / 全被過濾等特殊情況），必要時同步調整說明文件。

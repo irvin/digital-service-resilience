@@ -1,7 +1,7 @@
 - [x] 把會被 cloudflare challenge 的網站標示為測試錯誤 (eg., chatgpt.com, dcard.tw)
 - [x] 如果清理後剩下 0 個域名，也標示為錯誤 (eg., )
 - [x] 將 batch 中錯誤的網站另存一份 json 檔案
-- [ ] 使用 IPinfo Core plan 紀錄 anycaast 狀態
+- [ ] 使用多個地區的測試來比較確認 multicast 與海內外雲端的不同狀態
 - [ ] 讀取其他瀏覽器儲存下來的 HAR 檔案
 - [ ] 前端測試結果頁面要能夠顯示測試錯誤
 - [ ] canonical URL 與原始 URL 不同的行為
@@ -9,7 +9,8 @@
 - [ ] 前端測試結果頁面，如果雲端服務機器不在國內，也要先判斷為連不到
 - [ ] batch processing 加入平行測試
 - [ ] MANUAL_IGNORABLE_DOMAINS 加入 * 的支援
-- [ ] Fastly 有台灣節點嗎？
+- [x] Fastly 有台灣節點嗎？
 - [x] 有些網站沒有 www 就會錯誤（例如：chiayi.gov.tw）
 - [ ] 錯誤處理：ERR_HTTP2_PROTOCOL_ERROR （例如：adobe.com）
 - [ ] 測試常見的前端服務 (ref #被許多廣泛使用的 framework / service in [[重要民生服務及替代品]])
+- [ ] mv checkWebsiteResilience -> checkWebsiteLocally
