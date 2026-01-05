@@ -26,23 +26,77 @@ const MANUAL_IGNORABLE_DOMAINS = [
     // '*.clarity.ms'
 ];
 
-// 台灣 ASN 列表 - 暫時不使用
-/* const TAIWAN_ASN = [
-    'AS4780', // 中華電信
-    'AS3462', // 中華電信
-    'AS9924', // 台灣固網
-    'AS4782', // 中華電信國際
-    'AS18182' // 中華電信數據
-]; */
+const CLOUD_PROVIDERS_DATA_PATH = path.join(
+    __dirname,
+    'top-traffic-list-taiwan',
+    'cloud_providers_tw.json'
+);
+let CLOUD_PROVIDER_INDEX = null;
 
-// 已知有台灣節點的雲端服務
-const CLOUD_PROVIDERS = [
-    'GOOGLE',
-    'AMAZON',
-    'MICROSOFT',
-    'CLOUDFLARE',
-    'AKAMAI'
-];
+async function loadcloudProviderInfo() {
+    if (CLOUD_PROVIDER_INDEX) {
+        return CLOUD_PROVIDER_INDEX;
+    }
+
+    try {
+        const rawData = await fs.readFile(CLOUD_PROVIDERS_DATA_PATH, 'utf-8');
+        const data = JSON.parse(rawData);
+        const groupKeys = [
+            'providers_intl',
+            'providers_intl_without_known_taiwan_region/pop',
+            'providers_local'
+        ];
+        const providers = groupKeys.flatMap(key => Array.isArray(data[key]) ? data[key] : []);
+        const orgKeywordMap = new Map();
+        const asnMap = new Map();
+
+        for (const provider of providers) {
+            const name = provider?.name || 'Unknown';
+            const identifiers = provider?.identifiers || {};
+            for (const asn of identifiers.asn || []) {
+                if (asn) {
+                    asnMap.set(asn.toUpperCase(), name);
+                }
+            }
+            for (const keyword of identifiers.org_keywords || []) {
+                if (keyword) {
+                    orgKeywordMap.set(keyword.toUpperCase(), name);
+                }
+            }
+        }
+
+        CLOUD_PROVIDER_INDEX = { orgKeywordMap, asnMap };
+        return CLOUD_PROVIDER_INDEX;
+    } catch (error) {
+        console.warn(`無法載入雲端服務清單: ${error.message}`);
+        CLOUD_PROVIDER_INDEX = {
+            orgKeywordMap: new Map(),
+            asnMap: new Map()
+        };
+        return CLOUD_PROVIDER_INDEX;
+    }
+}
+
+function getCloudProviderMatch(orgValue, cloudProviderInfo) {
+    if (!orgValue || !cloudProviderInfo) {
+        return null;
+    }
+
+    const orgUpper = orgValue.toUpperCase();
+    const asnMatch = orgUpper.match(/AS\d+/);
+    if (asnMatch) {
+        const asn = asnMatch[0];
+        if (cloudProviderInfo.asnMap.has(asn)) {
+            return {
+                name: cloudProviderInfo.asnMap.get(asn),
+                matchType: 'asn',
+                matchValue: asn
+            };
+        }
+    }
+
+    return null;
+}
 
 
 // 動態載入的 adblock 清單域名（會在初始化時載入）
@@ -618,7 +672,7 @@ async function checkIPLocationWithAPI(domain, options = {}) {
                             console.log(`[DEBUG] 使用快取 IPinfo 結果: ${ip}`);
                         }
                         return {
-                            source: 'json api (cached)',
+                            source: 'ipinfo json api (cached)',
                             domain,
                             ip,
                             ...cachedResult
@@ -647,7 +701,7 @@ async function checkIPLocationWithAPI(domain, options = {}) {
         });
 
         const result = {
-            source: 'json api',
+            source: 'ipinfo json api (direct)',
             domain,
             ip,
             ...response.data
@@ -675,7 +729,7 @@ async function checkIPLocationWithAPI(domain, options = {}) {
                             console.log(`[DEBUG] 使用過期快取 IPinfo 結果: ${ip}`);
                         }
                         return {
-                            source: 'json api (expired cache)',
+                            source: 'ipinfo json api (expired cache)',
                             domain,
                             ip,
                             ...cachedResult
@@ -688,7 +742,7 @@ async function checkIPLocationWithAPI(domain, options = {}) {
         }
 
         return {
-            source: 'json api',
+            source: 'ipinfo json api (error)',
             domain,
             error: true,
             message: error.message
@@ -706,41 +760,41 @@ async function checkIPLocation(domain, customDNS = null, options = {}) {
     return apiResult;
 }
 
-function calculateResilience(ipInfoResults) {
-    const scores = {
-        domestic: 0,    // O: 台灣境內
-        cloud: 0,       // ?: 使用有台灣節點的雲端服務
-        foreign: 0,     // X: 境外服務
-        details: [],
-        comparisons: [] // 新增比較結果
+function checkLocally(ipInfoResults, cloudProviderInfo) {
+    const summary = {
+        domestic: { cloud: 0, direct: 0 },
+        foreign: { cloud: 0, direct: 0 }
     };
+    const details = [];
 
     for (const result of ipInfoResults) {
         if (result.error) continue;
 
-        let score;
-        // if (result.country === 'TW' || TAIWAN_ASN.some(asn => result.org?.includes(asn))) {
-        // 只使用 country 判斷是否為台灣境內服務
-        if (result.country === 'TW') {
-            score = 'O';
-            scores.domestic++;
-        } else if (CLOUD_PROVIDERS.some(provider => result.org?.toUpperCase().includes(provider))) {
-            score = '?';
-            scores.cloud++;
-        } else {
-            score = 'X';
-            scores.foreign++;
-        }
+        const isDomestic = result.country === 'TW';
+        const providerMatch = getCloudProviderMatch(result.org, cloudProviderInfo);
+        const isCloud = !!providerMatch;
+        const regionKey = isDomestic ? 'domestic' : 'foreign';
+        const categoryKey = isCloud ? 'cloud' : 'direct';
+        const category = `${regionKey}/${categoryKey}`;
 
-        scores.details.push({
+        summary[regionKey][categoryKey]++;
+        details.push({
             domain: result.domain,
-            score,
+            category,
+            isDomestic,
+            isCloud,
+            region: regionKey,
+            provider: providerMatch,
             source: result.source,
             location: `${result.country} (${result.org || 'Unknown'})`
         });
     }
 
-    return scores;
+    return {
+        summary,
+        details,
+        comparisons: []
+    };
 }
 
 /**
@@ -810,7 +864,7 @@ async function getLocalIPInfo(options = {}) {
         });
         return {
             ...response.data,
-            source: 'json api'
+            source: 'ipinfo json api (direct)'
         };
     } catch (error) {
         console.error('無法取得測試環境資訊:', error.message);
@@ -840,7 +894,7 @@ function formatDomainDetail(result, cleanedData, resilience) {
             org: result.org,
             timezone: result.timezone
         },
-        score: resilience.details.find(d => d.domain === result.domain)?.score
+        category: resilience.details.find(d => d.domain === result.domain)?.category
     };
 }
 
@@ -1089,14 +1143,16 @@ async function checkWebsiteResilience(url, options = {}) {
         );
 
         // 4. 計算韌性分數
-        const resilience = calculateResilience(locationResults);
+        const cloudProviderInfo = await loadcloudProviderInfo();
+        const resilience = checkLocally(locationResults, cloudProviderInfo);
 
         // 5. 產生報告
         console.log('\n檢測結果:');
         console.log('-------------------');
-        console.log(`境內服務 (O): ${resilience.domestic}`);
-        console.log(`有國內節點的雲端服務 (?): ${resilience.cloud}`);
-        console.log(`境外服務 (X): ${resilience.foreign}`);
+        console.log(`境內/雲端: ${resilience.summary.domestic.cloud}`);
+        console.log(`境內/直連: ${resilience.summary.domestic.direct}`);
+        console.log(`境外/雲端: ${resilience.summary.foreign.cloud}`);
+        console.log(`境外/直連: ${resilience.summary.foreign.direct}`);
 
         if (options.debug) {
             console.log('\n[DEBUG] 詳細域名資訊:');
@@ -1127,11 +1183,7 @@ async function checkWebsiteResilience(url, options = {}) {
             },
             requestCount: requests.length,
             uniqueDomains: domains.length,
-            test_results: {
-                domestic: resilience.domestic,
-                cloud_w_domestic_node: resilience.cloud,
-                foreign: resilience.foreign
-            },
+            test_results: resilience.summary,
             domainDetails: locationResults.map(result =>
                 formatDomainDetail(result, cleanedData, resilience)
             )
