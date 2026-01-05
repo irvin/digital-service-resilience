@@ -44,13 +44,30 @@ function formatCommandLineDisplay(argv) {
 
 /**
  * 讀取網站清單
+ * 支援兩種格式：
+ * 1. 普通網站清單：直接是陣列格式
+ * 2. 錯誤 log 檔案：包含 errorSites 欄位的物件
  */
 async function loadWebsiteList(testListPath) {
     const filePath = path.isAbsolute(testListPath)
         ? testListPath
         : path.join(__dirname, testListPath);
     const data = await fs.readFile(filePath, 'utf-8');
-    return JSON.parse(data);
+    const parsed = JSON.parse(data);
+
+    // 檢查是否為錯誤 log 格式（包含 errorSites 欄位）
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.errorSites) {
+        console.log(`偵測到錯誤 log 格式，將重新測試 ${parsed.errorSites.length} 個錯誤網站`);
+        return parsed.errorSites;
+    }
+
+    // 普通清單格式（陣列）
+    if (Array.isArray(parsed)) {
+        return parsed;
+    }
+
+    // 如果都不符合，拋出錯誤
+    throw new Error('無法識別的檔案格式：必須是網站清單陣列或包含 errorSites 的錯誤 log 物件');
 }
 
 /**
