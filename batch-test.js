@@ -285,7 +285,7 @@ if (require.main === module) {
     const args = process.argv.slice(2);
 
     // 解析命令列參數
-    let limit = undefined;
+    let limit;
     let startFrom = 0;
     let delayMs = DEFAULT_DELAY;
     let concurrency = DEFAULT_CONCURRENCY;
@@ -356,6 +356,46 @@ if (require.main === module) {
     const timeoutIndex = args.indexOf('--timeout');
     if (timeoutIndex !== -1 && args[timeoutIndex + 1]) {
         timeout = parseInt(args[timeoutIndex + 1], 10) * 1000; // 轉換為毫秒
+    }
+
+    // 驗證參數：檢查是否有無效的參數
+    const validOptions = [
+        '--limit', '--start-from', '--delay', '--concurrency',
+        '--dns', '--ipinfo-token', '--no-adblock', '--adblock-url',
+        '--no-cache', '--debug', '--timeout', '--help', '-h'
+    ];
+    const optionsWithValue = [
+        '--limit', '--start-from', '--delay', '--concurrency',
+        '--dns', '--ipinfo-token', '--adblock-url', '--timeout'
+    ];
+
+    const invalidArgs = [];
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        // 檢查是否是以 - 開頭的參數
+        if (arg.startsWith('-')) {
+            // 如果是有效參數，且需要值，則跳過下一個參數（值）
+            if (validOptions.includes(arg)) {
+                if (optionsWithValue.includes(arg)) {
+                    i++; // 跳過下一個參數（值）
+                }
+            } else {
+                // 無效參數
+                invalidArgs.push(arg);
+            }
+        }
+    }
+
+    // 如果有無效參數，顯示錯誤並退出
+    if (invalidArgs.length > 0) {
+        console.error('錯誤: 發現無效的參數:');
+        for (const arg of invalidArgs) {
+            console.error(`  ${arg}`);
+        }
+        console.error('');
+        console.error('使用方式: node batch-test.js [選項] <測試清單檔案路徑>');
+        console.error('使用 --help 或 -h 查看詳細說明');
+        process.exit(1);
     }
 
     // 從最後一個參數讀取測試清單路徑（必須不是以 -- 開頭的選項）
