@@ -15,6 +15,33 @@ const { checkWebsiteResilience } = require('./no-global-connection-check');
 const DEFAULT_DELAY = 1000; // 每個請求之間的延遲（毫秒）
 const DEFAULT_CONCURRENCY = 4; // 預設並行度
 
+function formatCommandLineDisplay(argv) {
+    if (!Array.isArray(argv) || argv.length === 0) {
+        return '';
+    }
+
+    const nodeBinary = path.basename(argv[0] || '');
+    const displayNode = nodeBinary === 'node' || nodeBinary === 'node.exe' ? 'node' : argv[0];
+
+    let scriptPath = argv[1] || '';
+    if (scriptPath) {
+        const relativePath = path.relative(process.cwd(), scriptPath);
+        if (relativePath && !relativePath.startsWith('..') && !path.isAbsolute(relativePath)) {
+            scriptPath = relativePath;
+        }
+    }
+
+    const displayArgs = [displayNode, scriptPath, ...argv.slice(2)].filter(Boolean);
+
+    // 格式化命令列參數
+    return displayArgs.map((arg) => {
+        if (/^[A-Za-z0-9_/.\-=:]+$/.test(arg)) {
+            return arg;
+        }
+        return `'${arg.replace(/'/g, `'\\''`)}'`;
+    }).join(' ');
+}
+
 /**
  * 讀取網站清單
  */
@@ -50,7 +77,8 @@ async function batchTest(options = {}) {
         useCache = true,
         testListPath,
         debug = false,
-        timeout = 120000
+        timeout = 120000,
+        argument = null
     } = options;
 
     if (!testListPath) {
@@ -208,6 +236,7 @@ async function batchTest(options = {}) {
         const summaryPath = path.join(logsDir, `batch_summary_${timestamp}.json`);
         const summary = {
             timestamp: new Date().toISOString(),
+            argument: argument || formatCommandLineDisplay(process.argv),
             options: {
                 testListPath,
                 limit,
@@ -388,7 +417,8 @@ if (require.main === module) {
         useCache,
         testListPath,
         debug,
-        timeout
+        timeout,
+        argument: formatCommandLineDisplay(process.argv)
     }).catch(error => {
         console.error('批量測試失敗:', error);
         if (debug) {
