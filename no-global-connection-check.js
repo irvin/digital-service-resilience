@@ -1227,6 +1227,22 @@ async function checkWebsiteResilience(url, options = {}) {
             // 儲存結果
             await fs.writeFile(outputPath, JSON.stringify(result, null, 2));
             console.log(`\n結果已儲存至: ${outputPath}`);
+
+            // 檢查並刪除對應的錯誤檔案（如果存在）
+            try {
+                const errorDir = path.join('test_results', '_error');
+                const errorFilePath = path.resolve(path.join(errorDir, `${filename}.error.json`));
+                try {
+                    await fs.access(errorFilePath);
+                    // 檔案存在，刪除它
+                    await fs.unlink(errorFilePath);
+                    console.log(`✓ 已刪除舊的錯誤檔案: ${filename}.error.json`);
+                } catch {
+                    // 檔案不存在，不需要處理
+                }
+            } catch (deleteError) {
+                console.warn(`無法檢查/刪除錯誤檔案: ${deleteError.message}`);
+            }
         }
 
         return result;
