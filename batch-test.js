@@ -15,6 +15,33 @@ const { checkWebsiteResilience } = require('./no-global-connection-check');
 const DEFAULT_DELAY = 1000; // 每個請求之間的延遲（毫秒）
 const DEFAULT_CONCURRENCY = 4; // 預設並行度
 
+function formatCommandLineDisplay(argv) {
+    if (!Array.isArray(argv) || argv.length === 0) {
+        return '';
+    }
+
+    const nodeBinary = path.basename(argv[0] || '');
+    const displayNode = nodeBinary === 'node' || nodeBinary === 'node.exe' ? 'node' : argv[0];
+
+    let scriptPath = argv[1] || '';
+    if (scriptPath) {
+        const relativePath = path.relative(process.cwd(), scriptPath);
+        if (relativePath && !relativePath.startsWith('..') && !path.isAbsolute(relativePath)) {
+            scriptPath = relativePath;
+        }
+    }
+
+    const displayArgs = [displayNode, scriptPath, ...argv.slice(2)].filter(Boolean);
+
+    // 格式化命令列參數
+    return displayArgs.map((arg) => {
+        if (/^[A-Za-z0-9_/.\-=:]+$/.test(arg)) {
+            return arg;
+        }
+        return `'${arg.replace(/'/g, `'\\''`)}'`;
+    }).join(' ');
+}
+
 /**
  * 讀取網站清單
  */
@@ -50,7 +77,8 @@ async function batchTest(options = {}) {
         useCache = true,
         testListPath,
         debug = false,
-        timeout = 120000
+        timeout = 120000,
+        argument = null
     } = options;
 
     if (!testListPath) {
@@ -125,19 +153,21 @@ async function batchTest(options = {}) {
 
                 // 記錄統計
                 stats.success++;
+                const testResults = result.test_results || {
+                    domestic: { cloud: 0, direct: 0 },
+                    foreign: { cloud: 0, direct: 0 }
+                };
                 stats.results.push({
                     website: website.website,
                     url: website.url,
                     rank: website.rank,
                     status: 'success',
-                    result: {
-                        domestic: result.test_results?.domestic || 0,
-                        cloud: result.test_results?.cloud_w_domestic_node || 0,
-                        foreign: result.test_results?.foreign || 0
-                    }
+                    result: testResults
                 });
 
-                console.log(`✓ 測試完成 (Worker ${workerId}): O=${result.test_results?.domestic || 0}, ?=${result.test_results?.cloud_w_domestic_node || 0}, X=${result.test_results?.foreign || 0}`);
+                const domestic = testResults.domestic || { cloud: 0, direct: 0 };
+                const foreign = testResults.foreign || { cloud: 0, direct: 0 };
+                console.log(`✓ 測試完成 (Worker ${workerId}): 境內/雲端=${domestic.cloud}, 境內/直連=${domestic.direct}, 境外/雲端=${foreign.cloud}, 境外/直連=${foreign.direct}`);
             } catch (error) {
                 // 只要有 errorReason，就視為「測試錯誤」，其餘視為一般失敗
                 const errResult = error.result || error;
@@ -208,6 +238,7 @@ async function batchTest(options = {}) {
         const summaryPath = path.join(logsDir, `batch_summary_${timestamp}.json`);
         const summary = {
             timestamp: new Date().toISOString(),
+            argument: argument || formatCommandLineDisplay(process.argv),
             options: {
                 testListPath,
                 limit,
@@ -256,7 +287,7 @@ if (require.main === module) {
     const args = process.argv.slice(2);
 
     // 解析命令列參數
-    let limit = undefined;
+    let limit;
     let startFrom = 0;
     let delayMs = DEFAULT_DELAY;
     let concurrency = DEFAULT_CONCURRENCY;
@@ -329,6 +360,46 @@ if (require.main === module) {
         timeout = parseInt(args[timeoutIndex + 1], 10) * 1000; // 轉換為毫秒
     }
 
+    // 驗證參數：檢查是否有無效的參數
+    const validOptions = [
+        '--limit', '--start-from', '--delay', '--concurrency',
+        '--dns', '--ipinfo-token', '--no-adblock', '--adblock-url',
+        '--no-cache', '--debug', '--timeout', '--help', '-h'
+    ];
+    const optionsWithValue = [
+        '--limit', '--start-from', '--delay', '--concurrency',
+        '--dns', '--ipinfo-token', '--adblock-url', '--timeout'
+    ];
+
+    const invalidArgs = [];
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        // 檢查是否是以 - 開頭的參數
+        if (arg.startsWith('-')) {
+            // 如果是有效參數，且需要值，則跳過下一個參數（值）
+            if (validOptions.includes(arg)) {
+                if (optionsWithValue.includes(arg)) {
+                    i++; // 跳過下一個參數（值）
+                }
+            } else {
+                // 無效參數
+                invalidArgs.push(arg);
+            }
+        }
+    }
+
+    // 如果有無效參數，顯示錯誤並退出
+    if (invalidArgs.length > 0) {
+        console.error('錯誤: 發現無效的參數:');
+        for (const arg of invalidArgs) {
+            console.error(`  ${arg}`);
+        }
+        console.error('');
+        console.error('使用方式: node batch-test.js [選項] <測試清單檔案路徑>');
+        console.error('使用 --help 或 -h 查看詳細說明');
+        process.exit(1);
+    }
+
     // 從最後一個參數讀取測試清單路徑（必須不是以 -- 開頭的選項）
     let testListPath = null;
     for (let i = args.length - 1; i >= 0; i--) {
@@ -388,7 +459,8 @@ if (require.main === module) {
         useCache,
         testListPath,
         debug,
-        timeout
+        timeout,
+        argument: formatCommandLineDisplay(process.argv)
     }).catch(error => {
         console.error('批量測試失敗:', error);
         if (debug) {
