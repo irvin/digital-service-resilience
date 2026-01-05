@@ -12,3 +12,4 @@
 - [ ] Fastly 有台灣節點嗎？
 - [x] 有些網站沒有 www 就會錯誤（例如：chiayi.gov.tw）
 - [ ] 錯誤處理：ERR_HTTP2_PROTOCOL_ERROR （例如：adobe.com）
+- [ ] 測試常見的前端服務 (ref #被許多廣泛使用的 framework / service in [[重要民生服務及替代品]])
