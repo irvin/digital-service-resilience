@@ -306,7 +306,7 @@ api.example.com: X (US (Amazon))
 
 ## 📜 授權
 
-This project is licensed under the CC0 1.0 Universal Public Domain Dedication. See the [LICENSE](/LICENSE) file for details.
+This project is licensed under the CC BY-NC-ND 4.0 International. See the [LICENSE](/LICENSE) file for details.
 
 ## 🙏 致謝
 
