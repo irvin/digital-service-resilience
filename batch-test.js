@@ -153,19 +153,21 @@ async function batchTest(options = {}) {
 
                 // 記錄統計
                 stats.success++;
+                const testResults = result.test_results || {
+                    domestic: { cloud: 0, direct: 0 },
+                    foreign: { cloud: 0, direct: 0 }
+                };
                 stats.results.push({
                     website: website.website,
                     url: website.url,
                     rank: website.rank,
                     status: 'success',
-                    result: {
-                        domestic: result.test_results?.domestic || 0,
-                        cloud: result.test_results?.cloud_w_domestic_node || 0,
-                        foreign: result.test_results?.foreign || 0
-                    }
+                    result: testResults
                 });
 
-                console.log(`✓ 測試完成 (Worker ${workerId}): O=${result.test_results?.domestic || 0}, ?=${result.test_results?.cloud_w_domestic_node || 0}, X=${result.test_results?.foreign || 0}`);
+                const domestic = testResults.domestic || { cloud: 0, direct: 0 };
+                const foreign = testResults.foreign || { cloud: 0, direct: 0 };
+                console.log(`✓ 測試完成 (Worker ${workerId}): 境內/雲端=${domestic.cloud}, 境內/直連=${domestic.direct}, 境外/雲端=${foreign.cloud}, 境外/直連=${foreign.direct}`);
             } catch (error) {
                 // 只要有 errorReason，就視為「測試錯誤」，其餘視為一般失敗
                 const errResult = error.result || error;
