@@ -10,6 +10,7 @@ require('dotenv').config();
 const fs = require('fs').promises;
 const path = require('path');
 const { checkWebsiteResilience } = require('./no-global-connection-check');
+const { main: generateStatistic } = require('./generate_statistic');
 
 // 預設參數
 const DEFAULT_DELAY = 1000; // 每個請求之間的延遲（毫秒）
@@ -297,6 +298,15 @@ async function batchTest(options = {}) {
             await fs.writeFile(errorListPath, JSON.stringify(errorList, null, 2));
             console.log(`錯誤網站清單已儲存: ${errorListPath}`);
         }
+
+        // 自動生成統計資料
+        try {
+            console.log('\n正在生成統計資料...');
+            await generateStatistic();
+        } catch (statError) {
+            console.warn('生成統計資料失敗:', statError.message);
+            // 不影響主流程，只顯示警告
+        }
     }
 
     return stats;
@@ -464,7 +474,7 @@ if (require.main === module) {
         console.log('node batch-test.js [選項] <測試清單檔案路徑>');
         console.log('');
         console.log('選項:');
-        console.log('  --limit N              測試前 N 個網站（預設: 全部）');
+        console.log('  --limit N              測試 N 個網站（預設: 全部）');
         console.log('  --start-from N         從第 N 個網站開始（預設: 0）');
         console.log('  --delay N              每個請求之間的延遲，單位毫秒（預設: 1000）');
         console.log('  --concurrency N        同時進行的最大測試數（預設: 4）');
