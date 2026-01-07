@@ -10,6 +10,7 @@ require('dotenv').config();
 const fs = require('fs').promises;
 const path = require('path');
 const { checkWebsiteResilience } = require('./no-global-connection-check');
+const { main: generateStatistic } = require('./generate_statistic');
 
 // 預設參數
 const DEFAULT_DELAY = 1000; // 每個請求之間的延遲（毫秒）
@@ -92,6 +93,7 @@ async function batchTest(options = {}) {
         useAdblock = true,
         adblockUrls = [],
         useCache = true,
+        headless = undefined,
         testListPath,
         debug = false,
         timeout = 120000,
@@ -164,6 +166,7 @@ async function batchTest(options = {}) {
                     useAdblock,
                     adblockUrls,
                     useCache,
+                    headless,
                     debug,
                     timeout
                 });
@@ -266,6 +269,7 @@ async function batchTest(options = {}) {
                 useAdblock,
                 adblockUrls,
                 useCache,
+                headless,
                 timeout
             },
             statistics: {
@@ -294,6 +298,15 @@ async function batchTest(options = {}) {
             await fs.writeFile(errorListPath, JSON.stringify(errorList, null, 2));
             console.log(`錯誤網站清單已儲存: ${errorListPath}`);
         }
+
+        // 自動生成統計資料
+        try {
+            console.log('\n正在生成統計資料...');
+            await generateStatistic();
+        } catch (statError) {
+            console.warn('生成統計資料失敗:', statError.message);
+            // 不影響主流程，只顯示警告
+        }
     }
 
     return stats;
@@ -313,6 +326,7 @@ if (require.main === module) {
     let useAdblock = true;
     let adblockUrls = [];
     let useCache = true;
+    let headless = undefined;
     let debug = false;
     let timeout = 120000; // 預設 120 秒
 
@@ -352,9 +366,15 @@ if (require.main === module) {
         token = args[tokenIndex + 1];
     }
 
-    // 解析 --no-adblock
-    if (args.includes('--no-adblock')) {
-        useAdblock = false;
+    // 解析 adblock 選項：--adblock true/false（預設為 true）
+    const adblockIndex = args.indexOf('--adblock');
+    if (adblockIndex !== -1 && args[adblockIndex + 1]) {
+        const adblockValue = args[adblockIndex + 1].toLowerCase();
+        if (adblockValue === 'false' || adblockValue === '0') {
+            useAdblock = false;
+        } else if (adblockValue === 'true' || adblockValue === '1') {
+            useAdblock = true;
+        }
     }
 
     // 解析 --adblock-url
@@ -363,9 +383,29 @@ if (require.main === module) {
         adblockUrls = args[adblockUrlIndex + 1].split(',').map(u => u.trim());
     }
 
-    // 解析 --no-cache
-    if (args.includes('--no-cache')) {
-        useCache = false;
+    // 解析快取選項：--cache true/false（預設為 true）
+    const cacheIndex = args.indexOf('--cache');
+    if (cacheIndex !== -1 && args[cacheIndex + 1]) {
+        const cacheValue = args[cacheIndex + 1].toLowerCase();
+        if (cacheValue === 'false' || cacheValue === '0') {
+            useCache = false;
+        } else if (cacheValue === 'true' || cacheValue === '1') {
+            useCache = true;
+        }
+    }
+
+    // 解析 headless 選項：--headless true/false（預設為 true）
+    const headlessIndex = args.indexOf('--headless');
+    if (headlessIndex !== -1 && args[headlessIndex + 1]) {
+        const headlessValue = args[headlessIndex + 1].toLowerCase();
+        if (headlessValue === 'false' || headlessValue === '0') {
+            headless = false;
+        } else if (headlessValue === 'true' || headlessValue === '1') {
+            headless = true;
+        }
+    } else {
+        // 預設為 true（headless 模式）
+        headless = true;
     }
 
     // 解析 --debug
@@ -380,12 +420,13 @@ if (require.main === module) {
     // 驗證參數：檢查是否有無效的參數
     const validOptions = [
         '--limit', '--start-from', '--delay', '--concurrency',
-        '--dns', '--ipinfo-token', '--no-adblock', '--adblock-url',
-        '--no-cache', '--debug', '--timeout', '--help', '-h'
+        '--dns', '--ipinfo-token', '--adblock', '--adblock-url',
+        '--cache', '--headless', '--debug', '--timeout', '--help', '-h'
     ];
     const optionsWithValue = [
         '--limit', '--start-from', '--delay', '--concurrency',
-        '--dns', '--ipinfo-token', '--adblock-url', '--timeout'
+        '--dns', '--ipinfo-token', '--adblock', '--adblock-url',
+        '--cache', '--headless', '--timeout'
     ];
 
     const invalidArgs = [];
@@ -433,15 +474,16 @@ if (require.main === module) {
         console.log('node batch-test.js [選項] <測試清單檔案路徑>');
         console.log('');
         console.log('選項:');
-        console.log('  --limit N              測試前 N 個網站（預設: 全部）');
+        console.log('  --limit N              測試 N 個網站（預設: 全部）');
         console.log('  --start-from N         從第 N 個網站開始（預設: 0）');
         console.log('  --delay N              每個請求之間的延遲，單位毫秒（預設: 1000）');
         console.log('  --concurrency N        同時進行的最大測試數（預設: 4）');
         console.log('  --dns IP               使用自訂 DNS 伺服器');
         console.log('  --ipinfo-token TOKEN   指定 IPinfo API token');
-        console.log('  --no-adblock           不使用 adblock 清單');
+        console.log('  --adblock false        不使用 adblock 清單（預設為使用）');
         console.log('  --adblock-url URL      使用自訂 adblock 清單 URL（可用逗號分隔多個）');
-        console.log('  --no-cache             不使用快取，強制重新下載');
+        console.log('  --cache false          不使用快取，強制重新下載 adblock 清單與 ipinfo 資料（預設 true）');
+        console.log('  --headless false       取消 headless 模式，顯示瀏覽器視窗（預設為 headless 模式 true）');
         console.log('  --debug                開啟 debug 模式，顯示詳細資訊');
         console.log('  --timeout N            設定頁面載入 timeout（秒，預設 120）');
         console.log('  --help, -h             顯示此說明');
@@ -474,6 +516,7 @@ if (require.main === module) {
         useAdblock,
         adblockUrls,
         useCache,
+        headless,
         testListPath,
         debug,
         timeout,

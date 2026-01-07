@@ -77,7 +77,12 @@ async function main() {
   console.log(`已產生 TSV：${OUTPUT}`);
 }
 
-main().catch((err) => {
-  console.error('執行失敗：', err);
-  process.exit(1);
-});
+// 如果直接執行此檔案（不是被 require）
+if (require.main === module) {
+  main().catch((err) => {
+    console.error('執行失敗：', err);
+    process.exit(1);
+  });
+}
+
+module.exports = { main };

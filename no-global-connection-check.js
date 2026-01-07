@@ -361,14 +361,24 @@ async function collectHARAndCanonical(url, options = {}) {
 
     const page = await context.newPage();
 
+    // 收集所有請求（包含主頁面請求）
+    const allRequests = [];
+
+    // 監聽所有請求
+    page.on('request', request => {
+        allRequests.push({
+            url: request.url(),
+            type: request.resourceType()
+        });
+
+        if (debug) {
+            console.log(`[DEBUG] → 請求: ${request.method()} ${request.url()}`);
+        }
+    });
+
     // 如果啟用 debug，監聽各種事件
     if (debug) {
         console.log(`[DEBUG] 開始載入頁面: ${url}`);
-
-        // 監聽請求
-        page.on('request', request => {
-            console.log(`[DEBUG] → 請求: ${request.method()} ${request.url()}`);
-        });
 
         // 監聽回應
         page.on('response', response => {
@@ -458,16 +468,15 @@ async function collectHARAndCanonical(url, options = {}) {
             console.log(`[DEBUG] Canonical URL: ${canonical}`);
         }
 
-        // 獲取 connection 數據
-        const requests = await page.evaluate(() => {
-            return performance.getEntriesByType('resource').map(entry => ({
-                url: entry.name,
-                type: entry.initiatorType
-            }));
-        });
+        // 使用 Playwright 請求監聽器收集的請求數據
+        // 這樣可以包含主頁面請求，而不只是資源請求
+        const requests = allRequests.map(req => ({
+            url: req.url,
+            type: req.type
+        }));
 
         if (debug) {
-            console.log(`[DEBUG] 收集到 ${requests.length} 個資源請求`);
+            console.log(`[DEBUG] 收集到 ${requests.length} 個請求`);
         }
 
         return { requests, canonical, httpStatus };
@@ -628,33 +637,6 @@ async function getDomainIP(domain, customDNS = null) {
         return null;
     }
 }
-
-/*
-async function checkIPLocationWithSDK(domain) {
-    try {
-        const ip = await getDomainIP(domain);
-        if (!ip) {
-            throw new Error(`無法獲取 ${domain} 的 IP 地址`);
-        }
-
-        const response = await ipinfo.lookupIp(ip);
-        return {
-            source: 'sdk',
-            domain,
-            ip,
-            ...response
-        };
-    } catch (error) {
-        console.error(`[SDK] 檢查 ${domain} 失敗:`, error.message);
-        return {
-            source: 'sdk',
-            domain,
-            error: true,
-            message: error.message
-        };
-    }
-}
-*/
 
 async function checkIPLocationWithAPI(domain, options = {}) {
     try {
@@ -968,95 +950,142 @@ async function checkWebsiteResilience(url, options = {}) {
             // URL 解析失敗，不重試
         }
 
-        // 重試流程：1. 一般版本（headless） -> 2. 一般版本 prefix www -> 3. 非 headless 版本 -> 4. 非 headless 版本 prefix www
+        // 重試流程：
+        // 如果指定了 headless=false，直接使用非 headless 模式
+        // 否則：1. 一般版本（headless） -> 2. 一般版本 prefix www -> 3. 非 headless 版本 -> 4. 非 headless 版本 prefix www
         let lastError = null;
 
-        // 1. 嘗試一般版本（headless）
-        try {
-            harResult = await collectHARAndCanonical(url, {
-                timeout: options.timeout || 120000,
-                debug: options.debug,
-                headless: true
-            });
-        } catch (error) {
-            lastError = error;
+        if (options.headless === false) {
+            // 強制使用非 headless 模式，跳過 headless 重試流程
+            try {
+                harResult = await collectHARAndCanonical(url, {
+                    timeout: options.timeout || 120000,
+                    debug: options.debug,
+                    headless: false
+                });
+            } catch (error) {
+                lastError = error;
 
-            // 2. 如果失敗，嘗試一般版本 prefix www（headless + www）
-            if (shouldRetryWithWww) {
-                try {
-                    const urlObj = new URL(url);
-                    urlObj.hostname = 'www.' + urlObj.hostname;
-                    const wwwUrl = urlObj.toString();
+                // 如果失敗，嘗試非 headless 版本 prefix www
+                if (shouldRetryWithWww) {
+                    try {
+                        const urlObj = new URL(url);
+                        urlObj.hostname = 'www.' + urlObj.hostname;
+                        const wwwUrl = urlObj.toString();
 
-                    console.log(`發生錯誤，嘗試使用 www. 版本（headless 模式）: ${wwwUrl}`);
-                    retriedWithWww = true;
+                        console.log(`發生錯誤，嘗試使用 www. 版本（非 headless 模式）: ${wwwUrl}`);
+                        retriedWithWww = true;
 
-                    harResult = await collectHARAndCanonical(wwwUrl, {
-                        timeout: options.timeout || 120000,
-                        debug: options.debug,
-                        headless: true
-                    });
-                    // 如果成功，更新 url 和 inputURL
-                    url = wwwUrl;
-                    inputURL = wwwUrl;
-                } catch (wwwError) {
-                    lastError = wwwError;
+                        harResult = await collectHARAndCanonical(wwwUrl, {
+                            timeout: options.timeout || 120000,
+                            debug: options.debug,
+                            headless: false
+                        });
+                        // 如果成功，更新 url 和 inputURL
+                        url = wwwUrl;
+                        inputURL = wwwUrl;
+                    } catch (finalError) {
+                        // 所有重試都失敗，更新 URL 為 www 版本（如果適用），然後拋出最後的錯誤
+                        const urlObj = new URL(url);
+                        urlObj.hostname = 'www.' + urlObj.hostname;
+                        const wwwUrl = urlObj.toString();
+                        url = wwwUrl;
+                        inputURL = wwwUrl;
+                        throw finalError;
+                    }
+                } else {
+                    throw error;
                 }
             }
+        } else {
+            // 預設重試流程：1. 一般版本（headless） -> 2. 一般版本 prefix www -> 3. 非 headless 版本 -> 4. 非 headless 版本 prefix www
+            // 1. 嘗試一般版本（headless）
+            try {
+                harResult = await collectHARAndCanonical(url, {
+                    timeout: options.timeout || 120000,
+                    debug: options.debug,
+                    headless: true
+                });
+            } catch (error) {
+                lastError = error;
 
-            // 3. 如果還是失敗，嘗試非 headless 版本
-            if (!harResult) {
-                try {
-                    console.log(`發生錯誤，嘗試使用非 headless 模式重試: ${url}`);
-                    retriedWithHeadful = true;
+                // 2. 如果失敗，嘗試一般版本 prefix www（headless + www）
+                if (shouldRetryWithWww) {
+                    try {
+                        const urlObj = new URL(url);
+                        urlObj.hostname = 'www.' + urlObj.hostname;
+                        const wwwUrl = urlObj.toString();
 
-                    harResult = await collectHARAndCanonical(url, {
-                        timeout: options.timeout || 120000,
-                        debug: options.debug,
-                        headless: false
-                    });
-                } catch (headfulError) {
-                    lastError = headfulError;
+                        console.log(`發生錯誤，嘗試使用 www. 版本（headless 模式）: ${wwwUrl}`);
+                        retriedWithWww = true;
 
-                    // 4. 如果還是失敗，嘗試非 headless 版本 prefix www
-                    if (shouldRetryWithWww) {
-                        try {
-                            const urlObj = new URL(url);
-                            urlObj.hostname = 'www.' + urlObj.hostname;
-                            const wwwUrl = urlObj.toString();
+                        harResult = await collectHARAndCanonical(wwwUrl, {
+                            timeout: options.timeout || 120000,
+                            debug: options.debug,
+                            headless: true
+                        });
+                        // 如果成功，更新 url 和 inputURL
+                        url = wwwUrl;
+                        inputURL = wwwUrl;
+                    } catch (wwwError) {
+                        lastError = wwwError;
+                    }
+                }
 
-                            console.log(`發生錯誤，嘗試使用 www. 版本（非 headless 模式）: ${wwwUrl}`);
-                            retriedWithWww = true;
+                // 3. 如果還是失敗，嘗試非 headless 版本
+                if (!harResult) {
+                    try {
+                        console.log(`發生錯誤，嘗試使用非 headless 模式重試: ${url}`);
+                        retriedWithHeadful = true;
 
-                            harResult = await collectHARAndCanonical(wwwUrl, {
-                                timeout: options.timeout || 120000,
-                                debug: options.debug,
-                                headless: false
-                            });
-                            // 如果成功，更新 url 和 inputURL
-                            url = wwwUrl;
-                            inputURL = wwwUrl;
-                        } catch (finalError) {
-                            // 所有重試都失敗，更新 URL 為 www 版本（如果適用），然後拋出最後的錯誤
-                            if (shouldRetryWithWww) {
+                        harResult = await collectHARAndCanonical(url, {
+                            timeout: options.timeout || 120000,
+                            debug: options.debug,
+                            headless: false
+                        });
+                    } catch (headfulError) {
+                        lastError = headfulError;
+
+                        // 4. 如果還是失敗，嘗試非 headless 版本 prefix www
+                        if (shouldRetryWithWww) {
+                            try {
                                 const urlObj = new URL(url);
                                 urlObj.hostname = 'www.' + urlObj.hostname;
                                 const wwwUrl = urlObj.toString();
+
+                                console.log(`發生錯誤，嘗試使用 www. 版本（非 headless 模式）: ${wwwUrl}`);
+                                retriedWithWww = true;
+
+                                harResult = await collectHARAndCanonical(wwwUrl, {
+                                    timeout: options.timeout || 120000,
+                                    debug: options.debug,
+                                    headless: false
+                                });
+                                // 如果成功，更新 url 和 inputURL
                                 url = wwwUrl;
                                 inputURL = wwwUrl;
+                            } catch (finalError) {
+                                // 所有重試都失敗，更新 URL 為 www 版本（如果適用），然後拋出最後的錯誤
+                                if (shouldRetryWithWww) {
+                                    const urlObj = new URL(url);
+                                    urlObj.hostname = 'www.' + urlObj.hostname;
+                                    const wwwUrl = urlObj.toString();
+                                    url = wwwUrl;
+                                    inputURL = wwwUrl;
+                                }
+                                throw finalError;
                             }
-                            throw finalError;
+                        } else {
+                            // 不需要嘗試 www 版本，直接拋出錯誤
+                            throw headfulError;
                         }
-                    } else {
-                        // 不需要嘗試 www 版本，直接拋出錯誤
-                        throw headfulError;
                     }
                 }
-            }
 
-            // 如果所有重試都失敗，拋出最後的錯誤
-            if (!harResult) {
-                throw lastError;
+                // 如果所有重試都失敗，拋出最後的錯誤
+                if (!harResult) {
+                    throw lastError;
+                }
             }
         }
 
@@ -1452,6 +1481,7 @@ if (require.main === module) {
     let debug = false;
     let useCache = true;
     let timeout = 120000; // 預設 120 秒
+    let headless = undefined; // 預設為 undefined，使用自動重試邏輯
 
     // 確保 URL 有 protocol
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
@@ -1481,10 +1511,17 @@ if (require.main === module) {
     // 檢查是否要開啟 debug 模式
     debug = args.includes('--debug');
 
-    // 檢查是否要使用 adblock 清單
-    if (args.includes('--no-adblock')) {
-        useAdblock = false;
+    // 解析 adblock 選項：--adblock true/false（預設為 true）
+    const adblockIndex = args.indexOf('--adblock');
+    if (adblockIndex !== -1 && args[adblockIndex + 1]) {
+        const adblockValue = args[adblockIndex + 1].toLowerCase();
+        if (adblockValue === 'false' || adblockValue === '0') {
+            useAdblock = false;
+        } else if (adblockValue === 'true' || adblockValue === '1') {
+            useAdblock = true;
+        }
     }
+    // 如果未指定，保持預設值 true
 
     // 解析自訂 adblock 清單 URL
     const adblockUrlIndex = args.indexOf('--adblock-url');
@@ -1496,9 +1533,30 @@ if (require.main === module) {
         }
     }
 
-    // 解析快取選項
-    if (args.includes('--no-cache')) {
-        useCache = false;
+    // 解析快取選項：--cache true/false（預設為 true）
+    const cacheIndex = args.indexOf('--cache');
+    if (cacheIndex !== -1 && args[cacheIndex + 1]) {
+        const cacheValue = args[cacheIndex + 1].toLowerCase();
+        if (cacheValue === 'false' || cacheValue === '0') {
+            useCache = false;
+        } else if (cacheValue === 'true' || cacheValue === '1') {
+            useCache = true;
+        }
+    }
+    // 如果未指定，保持預設值 true
+
+    // 解析 headless 選項：--headless true/false（預設為 true）
+    const headlessIndex = args.indexOf('--headless');
+    if (headlessIndex !== -1 && args[headlessIndex + 1]) {
+        const headlessValue = args[headlessIndex + 1].toLowerCase();
+        if (headlessValue === 'false' || headlessValue === '0') {
+            headless = false;
+        } else if (headlessValue === 'true' || headlessValue === '1') {
+            headless = true;
+        }
+    } else {
+        // 預設為 true（headless 模式）
+        headless = true;
     }
 
     if (!url || url.startsWith('--')) {
@@ -1506,12 +1564,13 @@ if (require.main === module) {
         console.error('使用方式:');
         console.error('  npm run check [--dns 8.8.8.8] [--save] https://example.com');
         console.error('  npm run check [--dns 8.8.8.8] [--ipinfo-token your-token] [--save] https://example.com');
-        console.error('  npm run check [--no-adblock] https://example.com  # 不使用 adblock 清單');
+        console.error('  npm run check [--adblock false] https://example.com  # 不使用 adblock 篩選連線紀錄（預設為使用）');
         console.error('  npm run check [--adblock-url url1,url2] https://example.com  # 使用自訂 adblock 清單');
-        console.error('  npm run check [--debug] https://example.com  # 開啟 debug 模式，顯示詳細資訊');
-        console.error('  npm run check [--no-cache] https://example.com  # 不使用快取，強制重新下載');
+        console.error('  npm run check [--debug] https://example.com  # debug 模式，顯示詳細資訊');
+        console.error('  npm run check [--cache false] https://example.com  # 不使用快取，強制重新下載 adblock 清單與 ipinfo 資料（預設 true）');
         console.error('  npm run check [--timeout N] https://example.com  # 設定頁面載入 timeout（秒，預設 120）');
-        process.exit(1);
+        console.error('  npm run check [--headless false] https://example.com  # 取消 headless 模式，顯示瀏覽器視窗（預設為 headless 模式）');
+    process.exit(1);
     }
 
     // 執行檢測
@@ -1523,7 +1582,8 @@ if (require.main === module) {
         adblockUrls,
         debug,
         useCache,
-        timeout
+        timeout,
+        headless
     })
         .then(() => {
             console.log('檢測完成');
