@@ -1511,10 +1511,17 @@ if (require.main === module) {
     // 檢查是否要開啟 debug 模式
     debug = args.includes('--debug');
 
-    // 檢查是否要使用 adblock 清單
-    if (args.includes('--no-adblock')) {
-        useAdblock = false;
+    // 解析 adblock 選項：--adblock true/false（預設為 true）
+    const adblockIndex = args.indexOf('--adblock');
+    if (adblockIndex !== -1 && args[adblockIndex + 1]) {
+        const adblockValue = args[adblockIndex + 1].toLowerCase();
+        if (adblockValue === 'false' || adblockValue === '0') {
+            useAdblock = false;
+        } else if (adblockValue === 'true' || adblockValue === '1') {
+            useAdblock = true;
+        }
     }
+    // 如果未指定，保持預設值 true
 
     // 解析自訂 adblock 清單 URL
     const adblockUrlIndex = args.indexOf('--adblock-url');
@@ -1526,10 +1533,17 @@ if (require.main === module) {
         }
     }
 
-    // 解析快取選項
-    if (args.includes('--no-cache')) {
-        useCache = false;
+    // 解析快取選項：--cache true/false（預設為 true）
+    const cacheIndex = args.indexOf('--cache');
+    if (cacheIndex !== -1 && args[cacheIndex + 1]) {
+        const cacheValue = args[cacheIndex + 1].toLowerCase();
+        if (cacheValue === 'false' || cacheValue === '0') {
+            useCache = false;
+        } else if (cacheValue === 'true' || cacheValue === '1') {
+            useCache = true;
+        }
     }
+    // 如果未指定，保持預設值 true
 
     // 解析 headless 選項：--headless true/false（預設為 true）
     const headlessIndex = args.indexOf('--headless');
@@ -1550,14 +1564,13 @@ if (require.main === module) {
         console.error('使用方式:');
         console.error('  npm run check [--dns 8.8.8.8] [--save] https://example.com');
         console.error('  npm run check [--dns 8.8.8.8] [--ipinfo-token your-token] [--save] https://example.com');
-        console.error('  npm run check [--no-adblock] https://example.com  # 不使用 adblock 清單');
+        console.error('  npm run check [--adblock false] https://example.com  # 不使用 adblock 篩選連線紀錄（預設為使用）');
         console.error('  npm run check [--adblock-url url1,url2] https://example.com  # 使用自訂 adblock 清單');
-        console.error('  npm run check [--debug] https://example.com  # 開啟 debug 模式，顯示詳細資訊');
-        console.error('  npm run check [--no-cache] https://example.com  # 不使用快取，強制重新下載');
+        console.error('  npm run check [--debug] https://example.com  # debug 模式，顯示詳細資訊');
+        console.error('  npm run check [--cache false] https://example.com  # 不使用快取，強制重新下載 adblock 清單與 ipinfo 資料（預設 true）');
         console.error('  npm run check [--timeout N] https://example.com  # 設定頁面載入 timeout（秒，預設 120）');
-        console.error('  npm run check [--headless true] https://example.com  # 使用 headless 模式（預設）');
-        console.error('  npm run check [--headless false] https://example.com  # 使用非 headless 模式（顯示瀏覽器視窗）');
-        process.exit(1);
+        console.error('  npm run check [--headless false] https://example.com  # 取消 headless 模式，顯示瀏覽器視窗（預設為 headless 模式）');
+    process.exit(1);
     }
 
     // 執行檢測

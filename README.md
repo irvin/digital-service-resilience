@@ -189,7 +189,7 @@ node no-global-connection-check.js https://example.com
 
 - **不使用 adblock 清單**：
 ```bash
-node no-global-connection-check.js --no-adblock https://example.com
+node no-global-connection-check.js --adblock false https://example.com
 ```
 
 - **使用自訂 adblock 清單**：
@@ -217,8 +217,23 @@ Debug 模式會顯示：
 
 - **不使用快取**（強制重新下載 adblock 清單和 IPinfo 資料）：
 ```bash
-node no-global-connection-check.js --no-cache https://example.com
+node no-global-connection-check.js --cache false https://example.com
 ```
+
+- **Headless 模式選項**：
+```bash
+# 使用 headless 模式（預設，不顯示瀏覽器視窗）
+node no-global-connection-check.js --headless true https://example.com
+
+# 使用非 headless 模式（顯示瀏覽器視窗）
+node no-global-connection-check.js --headless false https://example.com
+```
+
+**注意：** 當測試失敗時，工具會自動嘗試以下重試流程：
+1. 一般版本（headless）
+2. 一般版本 prefix www
+3. 非 headless 版本
+4. 非 headless 版本 prefix www
 
 ### 批次測試
 
@@ -248,10 +263,20 @@ node batch-test.js --limit 50 --start-from 10 top-traffic-list-taiwan/merged_lis
 node batch-test.js --delay 3000 --limit 10 top-traffic-list-taiwan/merged_lists_tw.json
 ```
 
-- **組合使用多個參數與原始測試支援的參數 **：
+- **組合使用多個參數**（支援所有單一測試的參數）：
 ```bash
-node batch-test.js --debug --adblock-url https://filter.futa.gg/hosts_abp.txt --limit 10 --delay 2000 top-traffic-list-taiwan/merged_lists_tw.json
+node batch-test.js --debug --adblock-url https://filter.futa.gg/hosts_abp.txt --adblock false --cache false --headless false --limit 10 --delay 2000 top-traffic-list-taiwan/merged_lists_tw.json
 ```
+
+**批次測試支援的參數**（與單一測試相同）：
+- `--adblock true/false`：是否使用 adblock 清單（預設：true）
+- `--cache true/false`：是否使用快取（預設：true）
+- `--headless true/false`：是否使用 headless 模式（預設：true）
+- `--adblock-url URL`：自訂 adblock 清單 URL
+- `--dns IP`：自訂 DNS 伺服器
+- `--ipinfo-token TOKEN`：IPinfo API token
+- `--debug`：開啟 debug 模式
+- `--timeout N`：頁面載入 timeout（秒）
 
 #### 批次測試結果
 
