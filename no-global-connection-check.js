@@ -347,11 +347,13 @@ async function initializeIgnorableDomains(options = {}) {
 async function collectHARAndCanonical(url, options = {}) {
     const timeout = options.timeout || 120000; // 預設 120 秒
     const debug = options.debug || false;
+    // 如果明確指定 headless，使用指定值；否則預設為 true（headless 模式）
+    const headless = options.headless !== undefined ? options.headless : true;
 
-    const browser = await chromium.launch();
-    // const browser = await chromium.launch({
-    //     headless: !debug // debug 模式下顯示瀏覽器視窗
-    // });
+    const browser = await chromium.launch({
+        headless: headless
+    });
+
     const context = await browser.newContext({
         bypassCSP: true,
         ignoreHTTPSErrors: true
@@ -952,60 +954,109 @@ async function checkWebsiteResilience(url, options = {}) {
         // 1. 收集 connections 和 canonical URL
         let harResult = null;
         let retriedWithWww = false;
+        let retriedWithHeadful = false;
+        // 檢查是否需要嘗試 www 版本
+        let shouldRetryWithWww = false;
+        try {
+            const urlObj = new URL(url);
+            const hostname = urlObj.hostname;
+            // 如果沒有 www 前綴，則可以嘗試 www 版本
+            if (!hostname.startsWith('www.')) {
+                shouldRetryWithWww = true;
+            }
+        } catch {
+            // URL 解析失敗，不重試
+        }
 
+        // 重試流程：1. 一般版本（headless） -> 2. 一般版本 prefix www -> 3. 非 headless 版本 -> 4. 非 headless 版本 prefix www
+        let lastError = null;
+
+        // 1. 嘗試一般版本（headless）
         try {
             harResult = await collectHARAndCanonical(url, {
                 timeout: options.timeout || 120000,
-                debug: options.debug
+                debug: options.debug,
+                headless: true
             });
         } catch (error) {
-            // 檢查是否為 DNS/網路錯誤或 HTTP 404 錯誤
-            const isDnsError = error.message && (error.message.includes('ERR_NAME_NOT_RESOLVED'));
-            const isHttp404 = error.message && /^HTTP 404/.test(error.message);
+            lastError = error;
 
-            // 檢查原始 URL 是否沒有 www. 前綴
-            let shouldRetryWithWww = false;
-            try {
-                const urlObj = new URL(url);
-                const hostname = urlObj.hostname;
-                // 如果是 DNS 錯誤或 HTTP 404，且沒有 www 前綴，則重試
-                if (!hostname.startsWith('www.') && (isDnsError || isHttp404)) {
-                    shouldRetryWithWww = true;
-                }
-            } catch {
-                // URL 解析失敗，不重試
-            }
-
+            // 2. 如果失敗，嘗試一般版本 prefix www（headless + www）
             if (shouldRetryWithWww) {
-                // 嘗試加上 www. 前綴
                 try {
                     const urlObj = new URL(url);
                     urlObj.hostname = 'www.' + urlObj.hostname;
                     const wwwUrl = urlObj.toString();
 
-                    const errorType = isDnsError ? 'DNS 解析失敗' : 'HTTP 404 錯誤';
-                    console.log(`${errorType}，嘗試使用 www. 版本: ${wwwUrl}`);
+                    console.log(`發生錯誤，嘗試使用 www. 版本（headless 模式）: ${wwwUrl}`);
                     retriedWithWww = true;
 
                     harResult = await collectHARAndCanonical(wwwUrl, {
                         timeout: options.timeout || 120000,
-                        debug: options.debug
+                        debug: options.debug,
+                        headless: true
                     });
                     // 如果成功，更新 url 和 inputURL
                     url = wwwUrl;
                     inputURL = wwwUrl;
-                } catch (retryError) {
-                    // 重試也失敗，更新 URL 為 www 版本，然後拋出重試時的錯誤
-                    const urlObj = new URL(url);
-                    urlObj.hostname = 'www.' + urlObj.hostname;
-                    const wwwUrl = urlObj.toString();
-                    url = wwwUrl;
-                    inputURL = wwwUrl;
-                    throw retryError;  // 拋出重試時的錯誤，而不是原始錯誤
+                } catch (wwwError) {
+                    lastError = wwwError;
                 }
-            } else {
-                // 不符合重試條件，直接拋出錯誤
-                throw error;
+            }
+
+            // 3. 如果還是失敗，嘗試非 headless 版本
+            if (!harResult) {
+                try {
+                    console.log(`發生錯誤，嘗試使用非 headless 模式重試: ${url}`);
+                    retriedWithHeadful = true;
+
+                    harResult = await collectHARAndCanonical(url, {
+                        timeout: options.timeout || 120000,
+                        debug: options.debug,
+                        headless: false
+                    });
+                } catch (headfulError) {
+                    lastError = headfulError;
+
+                    // 4. 如果還是失敗，嘗試非 headless 版本 prefix www
+                    if (shouldRetryWithWww) {
+                        try {
+                            const urlObj = new URL(url);
+                            urlObj.hostname = 'www.' + urlObj.hostname;
+                            const wwwUrl = urlObj.toString();
+
+                            console.log(`發生錯誤，嘗試使用 www. 版本（非 headless 模式）: ${wwwUrl}`);
+                            retriedWithWww = true;
+
+                            harResult = await collectHARAndCanonical(wwwUrl, {
+                                timeout: options.timeout || 120000,
+                                debug: options.debug,
+                                headless: false
+                            });
+                            // 如果成功，更新 url 和 inputURL
+                            url = wwwUrl;
+                            inputURL = wwwUrl;
+                        } catch (finalError) {
+                            // 所有重試都失敗，更新 URL 為 www 版本（如果適用），然後拋出最後的錯誤
+                            if (shouldRetryWithWww) {
+                                const urlObj = new URL(url);
+                                urlObj.hostname = 'www.' + urlObj.hostname;
+                                const wwwUrl = urlObj.toString();
+                                url = wwwUrl;
+                                inputURL = wwwUrl;
+                            }
+                            throw finalError;
+                        }
+                    } else {
+                        // 不需要嘗試 www 版本，直接拋出錯誤
+                        throw headfulError;
+                    }
+                }
+            }
+
+            // 如果所有重試都失敗，拋出最後的錯誤
+            if (!harResult) {
+                throw lastError;
             }
         }
 
@@ -1013,6 +1064,9 @@ async function checkWebsiteResilience(url, options = {}) {
         canonicalURL = harResult.canonical || null;
         httpStatus = harResult.httpStatus || null;
 
+        if (retriedWithHeadful) {
+            console.log(`成功使用非 headless 模式進行測試`);
+        }
         if (retriedWithWww) {
             console.log(`成功使用 www. 版本進行測試`);
         }
@@ -1229,16 +1283,50 @@ async function checkWebsiteResilience(url, options = {}) {
             console.log(`\n結果已儲存至: ${outputPath}`);
 
             // 檢查並刪除對應的錯誤檔案（如果存在）
+            // 同時檢查並刪除 www 和非 www 版本的錯誤檔案
             try {
                 const errorDir = path.join('test_results', '_error');
-                const errorFilePath = path.resolve(path.join(errorDir, `${filename}.error.json`));
-                try {
-                    await fs.access(errorFilePath);
-                    // 檔案存在，刪除它
-                    await fs.unlink(errorFilePath);
-                    console.log(`✓ 已刪除舊的錯誤檔案: ${filename}.error.json`);
-                } catch {
-                    // 檔案不存在，不需要處理
+                const hostname = urlObj.hostname;
+
+                // 生成兩個可能的檔名（www 和非 www 版本）
+                const possibleFilenames = [];
+
+                // 當前 hostname 的檔名
+                possibleFilenames.push(filename);
+
+                // 如果是 www 版本，也檢查非 www 版本
+                if (hostname.startsWith('www.')) {
+                    const nonWwwHostname = hostname.slice(4); // 移除 'www.'
+                    let nonWwwFilename = `${nonWwwHostname}${urlObj.pathname.replace(/\//g, '_')}${
+                        urlObj.search ? '_' + urlObj.search.replace(/[?&=]/g, '_') : ''
+                    }`.replace(/_+$/, '');
+                    if (nonWwwFilename.length > 95) {
+                        nonWwwFilename = nonWwwFilename.slice(0, 95);
+                    }
+                    possibleFilenames.push(nonWwwFilename);
+                } else {
+                    // 如果是非 www 版本，也檢查 www 版本
+                    const wwwHostname = 'www.' + hostname;
+                    let wwwFilename = `${wwwHostname}${urlObj.pathname.replace(/\//g, '_')}${
+                        urlObj.search ? '_' + urlObj.search.replace(/[?&=]/g, '_') : ''
+                    }`.replace(/_+$/, '');
+                    if (wwwFilename.length > 95) {
+                        wwwFilename = wwwFilename.slice(0, 95);
+                    }
+                    possibleFilenames.push(wwwFilename);
+                }
+
+                // 嘗試刪除所有可能的錯誤檔案
+                for (const possibleFilename of possibleFilenames) {
+                    const errorFilePath = path.resolve(path.join(errorDir, `${possibleFilename}.error.json`));
+                    try {
+                        await fs.access(errorFilePath);
+                        // 檔案存在，刪除它
+                        await fs.unlink(errorFilePath);
+                        console.log(`✓ 已刪除舊的錯誤檔案: ${possibleFilename}.error.json`);
+                    } catch {
+                        // 檔案不存在，不需要處理
+                    }
                 }
             } catch (deleteError) {
                 console.warn(`無法檢查/刪除錯誤檔案: ${deleteError.message}`);
