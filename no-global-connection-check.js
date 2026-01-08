@@ -1425,9 +1425,7 @@ async function checkWebsiteResilience(url, options = {}) {
                             : `Error: ${error.name || 'Unknown'}`,
                 errorDetails: {
                     message: error.message,
-                    name: error.name,
-                    statusCode: httpStatusMatch ? httpStatusMatch[1] : null,
-                    stack: error.stack
+                    statusCode: httpStatusMatch ? httpStatusMatch[1] : null
                 }
             };
         }
