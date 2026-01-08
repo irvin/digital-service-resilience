@@ -1377,6 +1377,10 @@ async function checkWebsiteResilience(url, options = {}) {
             const isHttp4xx = error.message && /^HTTP 4\d{2}/.test(error.message);
             const httpStatusMatch = error.message?.match(/^HTTP (\d{3})/);
 
+            // 檢查是否為 net error（如 ERR_ADDRESS_UNREACHABLE, ERR_NAME_NOT_RESOLVED 等）
+            const netErrorMatch = error.message?.match(/net::(ERR_[A-Z_]+)/);
+            const netErrorCode = netErrorMatch ? netErrorMatch[1] : null;
+
             // 如果有從錯誤訊息中提取的狀態碼，優先使用；否則使用已取得的 httpStatus
             const errorHttpStatus = httpStatusMatch ? parseInt(httpStatusMatch[1], 10) : httpStatus;
 
@@ -1414,14 +1418,14 @@ async function checkWebsiteResilience(url, options = {}) {
                 testError: true,
                 errorReason: isHttp4xx
                     ? `HTTP ${httpStatusMatch ? httpStatusMatch[1] : '4xx'} Error`
-                    : isTimeout
-                        ? 'Timeout'
-                        : `Error: ${error.name || 'Unknown'}`,
+                    : netErrorCode
+                        ? netErrorCode
+                        : isTimeout
+                            ? 'Timeout'
+                            : `Error: ${error.name || 'Unknown'}`,
                 errorDetails: {
                     message: error.message,
-                    name: error.name,
-                    statusCode: httpStatusMatch ? httpStatusMatch[1] : null,
-                    stack: error.stack
+                    statusCode: httpStatusMatch ? httpStatusMatch[1] : null
                 }
             };
         }
