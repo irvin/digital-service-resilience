@@ -7,10 +7,12 @@
 - [ ] canonical URL 與原始 URL 不同的行為
 - [ ] 要確認 gtm 載入的 script 有沒有抓到（例如：sitcon.org）
 - [ ] 前端測試結果頁面，如果雲端服務機器不在國內，也要先判斷為連不到
-- [ ] batch processing 加入平行測試
+- [x] batch processing 加入平行測試
 - [ ] MANUAL_IGNORABLE_DOMAINS 加入 * 的支援
 - [x] Fastly 有台灣節點嗎？
 - [x] 有些網站沒有 www 就會錯誤（例如：chiayi.gov.tw）
-- [ ] 錯誤處理：ERR_HTTP2_PROTOCOL_ERROR （例如：adobe.com）
+- [x] 錯誤處理：ERR_HTTP2_PROTOCOL_ERROR （例如：adobe.com）
 - [ ] 測試常見的前端服務 (ref #被許多廣泛使用的 framework / service in [[重要民生服務及替代品]])
 - [ ] mv checkWebsiteResilience -> checkWebsiteLocally
+- [x] batch test 結束後自動更新 statistic
+- [ ] 確認 Error: Error 如何修正
