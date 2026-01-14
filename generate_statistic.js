@@ -83,18 +83,24 @@ async function main() {
     const foreignCloud = data.test_results?.foreign?.cloud ?? 0;
     const foreignDirect = data.test_results?.foreign?.direct ?? 0;
 
-    const domesticTotal = domesticCloud + domesticDirect;
-    const foreignTotal = foreignCloud + foreignDirect;
+    const totalDomestic = domesticCloud + domesticDirect;
+    const totalForeign = foreignCloud + foreignDirect;
+    const totalCloud = domesticCloud + foreignCloud;
+    const totalDirect = domesticDirect + foreignDirect;
     const resilience =
-      domesticTotal > 0 && foreignTotal === 0 ? 1 : 0;
+      totalDomestic > 0 && totalForeign === 0 ? 1 : 0;
 
     dataMap.set(normalizedUrl, {
       url,
       timestamp,
       domesticCloud,
       domesticDirect,
+      totalDomestic,
       foreignCloud,
       foreignDirect,
+      totalForeign,
+      totalCloud,
+      totalDirect,
       resilience,
     });
   }
@@ -120,8 +126,12 @@ async function main() {
       'timestamp',
       'results_domestic_cloud',
       'results_domestic_direct',
+      'total_domestic',
       'results_foreign_cloud',
       'results_foreign_direct',
+      'total_foreign',
+      'total_cloud',
+      'total_direct',
       'resilience',
     ].join('\t'),
   );
@@ -134,8 +144,12 @@ async function main() {
         String(data.timestamp),
         String(data.domesticCloud),
         String(data.domesticDirect),
+        String(data.totalDomestic),
         String(data.foreignCloud),
         String(data.foreignDirect),
+        String(data.totalForeign),
+        String(data.totalCloud),
+        String(data.totalDirect),
         String(data.resilience),
       ].join('\t'),
     );
