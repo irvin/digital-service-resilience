@@ -10,13 +10,20 @@ const MERGED_LISTS_PATH = path.resolve(
   'merged_lists_tw.json',
 );
 
-// 正規化 URL 以便比對（移除 protocol、trailing slash、轉小寫）
+// 正規化 URL 以便比對（移除 protocol、trailing slash、www. 前綴、轉小寫）
 function normalizeUrl(url) {
   if (!url) return '';
-  return url
+  let normalized = url
     .replace(/^https?:\/\//i, '')
     .replace(/\/$/, '')
     .toLowerCase();
+
+  // 移除 www. 前綴（僅當開頭是 www. 時）
+  if (normalized.startsWith('www.')) {
+    normalized = normalized.substring(4);
+  }
+
+  return normalized;
 }
 
 async function main() {

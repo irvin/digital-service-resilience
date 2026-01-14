@@ -15,6 +15,9 @@ const { Resolver } = require('dns').promises;
 const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
+const { exec } = require('child_process');
+const { promisify } = require('util');
+const execAsync = promisify(exec);
 
 // 建立 ipinfo client
 // const ipinfo = new IPinfoWrapper(process.env.IPINFO_TOKEN || undefined);
@@ -36,6 +39,28 @@ const CLOUD_PROVIDERS_DATA_PATH = path.join(
     'cloud_providers_tw.json'
 );
 let CLOUD_PROVIDER_INDEX = null;
+
+// 需要進一步判斷的雲端服務商 ASN 列表
+const TARGET_CLOUD_ASNS = [
+    'AS15169',   // Google LLC
+    'AS396982',  // Google LLC
+    'AS19527',   // Google LLC
+    'AS13335',   // Cloudflare, Inc.
+    'AS209242',  // Cloudflare, Inc.
+    'AS16509',   // Amazon.com, Inc.
+    'AS14618',   // Amazon.com, Inc.
+    'AS54113',   // Fastly, Inc.
+    'AS16625',   // Akamai Technologies, Inc.
+    'AS20940',   // Akamai Technologies, Inc.
+    'AS32787',   // Akamai Technologies, Inc.
+    'AS8075'    // Microsoft Azure
+];
+
+// 需要檢查的 response headers
+const CLOUD_HEADERS = ['cf-ray', 'x-amz-cf-pop', 'x-served-by'];
+
+// RTT 測試閾值（毫秒）
+const RTT_THRESHOLD = 15;
 
 async function loadcloudProviderInfo() {
     if (CLOUD_PROVIDER_INDEX) {
@@ -356,13 +381,17 @@ async function collectHARAndCanonical(url, options = {}) {
 
     const context = await browser.newContext({
         bypassCSP: true,
-        ignoreHTTPSErrors: true
+        ignoreHTTPSErrors: true,
+        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     });
 
     const page = await context.newPage();
 
     // 收集所有請求（包含主頁面請求）
     const allRequests = [];
+
+    // 收集 response headers
+    const responseHeadersMap = new Map();
 
     // 監聽所有請求
     page.on('request', request => {
@@ -376,16 +405,27 @@ async function collectHARAndCanonical(url, options = {}) {
         }
     });
 
-    // 如果啟用 debug，監聽各種事件
-    if (debug) {
-        console.log(`[DEBUG] 開始載入頁面: ${url}`);
+    // 監聽回應並收集 headers（不僅限於 debug 模式）
+    page.on('response', async (response) => {
+        const url = response.url();
+        try {
+            const headers = response.headers();
+            responseHeadersMap.set(url, headers);
+        } catch (error) {
+            // 忽略無法取得 headers 的情況
+        }
 
-        // 監聽回應
-        page.on('response', response => {
+        // 保留原有的 debug 輸出
+        if (debug) {
             const status = response.status();
             const statusText = status >= 400 ? '❌' : '✓';
             console.log(`[DEBUG] ${statusText} 回應: ${status} ${response.url()}`);
-        });
+        }
+    });
+
+    // 如果啟用 debug，監聽各種事件
+    if (debug) {
+        console.log(`[DEBUG] 開始載入頁面: ${url}`);
 
         // 監聽請求失敗
         page.on('requestfailed', request => {
@@ -454,15 +494,24 @@ async function collectHARAndCanonical(url, options = {}) {
         }
 
         // 嘗試獲取 canonical URL
-        const canonical = await page.evaluate((originalURL) => {
-            // 優先使用 canonical 標籤
-            const canonicalLink = document.querySelector('link[rel="canonical"]');
-            if (canonicalLink) {
-                return canonicalLink.href;
+        let canonical = url; // 預設使用原始 URL
+        try {
+            canonical = await page.evaluate((originalURL) => {
+                // 優先使用 canonical 標籤
+                const canonicalLink = document.querySelector('link[rel="canonical"]');
+                if (canonicalLink) {
+                    return canonicalLink.href;
+                }
+                // 如果沒有 canonical 標籤，使用原始 URL
+                return originalURL;
+            }, url);
+        } catch (evaluateError) {
+            // 如果 evaluate 失敗（例如頁面導航導致執行上下文被破壞），使用原始 URL
+            if (debug) {
+                console.log(`[DEBUG] 無法取得 canonical URL: ${evaluateError.message}，使用原始 URL`);
             }
-            // 如果沒有 canonical 標籤，使用原始 URL
-            return originalURL;
-        }, url);
+            canonical = url;
+        }
 
         if (debug) {
             console.log(`[DEBUG] Canonical URL: ${canonical}`);
@@ -479,7 +528,7 @@ async function collectHARAndCanonical(url, options = {}) {
             console.log(`[DEBUG] 收集到 ${requests.length} 個請求`);
         }
 
-        return { requests, canonical, httpStatus };
+        return { requests, canonical, httpStatus, responseHeaders: responseHeadersMap };
     } finally {
         await browser.close();
         if (debug) {
@@ -740,6 +789,84 @@ async function checkIPLocationWithAPI(domain, options = {}) {
     }
 }
 
+/**
+ * 從 org 欄位中提取 ASN
+ * @param {string} org - org 字串，例如 "AS13335 Cloudflare, Inc."
+ * @returns {string|null} ASN 字串，例如 "AS13335"，如果無法提取則返回 null
+ */
+function extractASN(org) {
+    if (!org || typeof org !== 'string') return null;
+    const match = org.match(/^(AS\d+)\s+/i);
+    return match ? match[1].toUpperCase() : null;
+}
+
+/**
+ * 檢查 response headers 是否包含 TPE（台灣節點標記）
+ * @param {Object} headers - response headers 物件
+ * @returns {Object} 包含 found, hasTPE, values 的物件
+ */
+function checkCloudProviderHeaders(headers) {
+    if (!headers || typeof headers !== 'object') {
+        return { found: false, hasTPE: false, values: {} };
+    }
+
+    const values = {};
+    let found = false;
+    let hasTPE = false;
+
+    for (const headerName of CLOUD_HEADERS) {
+        const headerValue = headers[headerName] || headers[headerName.toLowerCase()];
+        if (headerValue) {
+            found = true;
+            values[headerName] = headerValue;
+            // 檢查是否包含 TPE（不區分大小寫）
+            if (headerValue.toUpperCase().includes('TPE')) {
+                hasTPE = true;
+            }
+        }
+    }
+
+    return { found, hasTPE, values };
+}
+
+/**
+ * 對指定 IP 進行 RTT 測試
+ * @param {string} ip - IP 地址
+ * @returns {Promise<number|null>} 最小延遲時間（毫秒），如果測試失敗則返回 null
+ */
+async function performRTTTest(ip) {
+    const isWindows = process.platform === 'win32';
+    const command = isWindows
+        ? `ping -n 5 -i 0.2 ${ip}`
+        : `ping -c 5 -i 0.2 ${ip}`;
+
+    try {
+        const { stdout } = await execAsync(command, { timeout: 10000 });
+
+        // 解析 ping 輸出提取時間
+        // Windows 格式: time=14.516ms 或 time<1ms
+        // Unix/Mac 格式: time=14.516 ms
+        const timePattern = isWindows
+            ? /time[=<](\d+\.?\d*)\s*ms/gi
+            : /time=(\d+\.?\d*)\s*ms/gi;
+
+        const matches = stdout.match(timePattern);
+        if (matches && matches.length > 0) {
+            const times = matches.map(match => {
+                const timeMatch = match.match(/(\d+\.?\d*)/);
+                return timeMatch ? parseFloat(timeMatch[1]) : Infinity;
+            });
+            const minTime = Math.min(...times.filter(t => t !== Infinity));
+            return minTime !== Infinity ? minTime : null;
+        }
+    } catch (error) {
+        // RTT 測試失敗，返回 null
+        return null;
+    }
+
+    return null;
+}
+
 async function checkIPLocation(domain, customDNS = null, options = {}) {
     const apiResult = await checkIPLocationWithAPI(domain, {
         customDNS,
@@ -747,7 +874,113 @@ async function checkIPLocation(domain, customDNS = null, options = {}) {
         token: options.token,
         debug: options.debug
     });
-    return apiResult;
+
+    // 如果查詢失敗，直接返回
+    if (apiResult.error) {
+        return apiResult;
+    }
+
+    // 如果 country 是 TW，不需要進一步判斷
+    if (apiResult.country === 'TW') {
+        return {
+            ...apiResult,
+            cloud_provider: null
+        };
+    }
+
+    // 提取 ASN
+    const asn = extractASN(apiResult.org);
+    if (!asn || !TARGET_CLOUD_ASNS.includes(asn)) {
+        // 不在目標 ASN 列表中，不需要進一步判斷
+        return {
+            ...apiResult,
+            cloud_provider: null
+        };
+    }
+
+    // 取得該 domain 對應的 response headers
+    const responseHeaders = options.responseHeaders || null;
+    const domainUrl = options.domainUrl || null;
+    let domainHeaders = null;
+    let foundTPE = false;
+    let headerValues = {};
+
+    if (responseHeaders) {
+        // 先嘗試使用指定的 URL（第一個請求）
+        if (domainUrl) {
+            domainHeaders = responseHeaders.get(domainUrl);
+            if (domainHeaders) {
+                const check = checkCloudProviderHeaders(domainHeaders);
+                if (check.hasTPE) {
+                    foundTPE = true;
+                    headerValues = check.values;
+                }
+            }
+        }
+
+        // 如果指定的 URL 沒有找到 TPE，檢查該 domain 的所有相關 URL
+        if (!foundTPE) {
+            for (const [url, headers] of responseHeaders.entries()) {
+                try {
+                    const urlObj = new URL(url);
+                    if (urlObj.hostname === domain) {
+                        const check = checkCloudProviderHeaders(headers);
+                        if (check.hasTPE) {
+                            foundTPE = true;
+                            headerValues = check.values;
+                            domainHeaders = headers;
+                            break; // 找到一個包含 TPE 的就夠了
+                        }
+                    }
+                } catch {
+                    // 忽略 URL 解析錯誤
+                }
+            }
+        }
+    }
+
+    // 檢查 headers
+    if (foundTPE) {
+        return {
+            ...apiResult,
+            cloud_provider: {
+                country: 'tw',
+                ...headerValues,
+                detection_method: 'header'
+            }
+        };
+    }
+
+    // 如果沒有找到包含 TPE 的 header，進行 RTT 測試
+    const rtt = await performRTTTest(apiResult.ip);
+    if (rtt !== null) {
+        if (rtt < RTT_THRESHOLD) {
+            // RTT < 15ms，判斷為台灣
+            return {
+                ...apiResult,
+                cloud_provider: {
+                    country: 'tw',
+                    rtt: rtt,
+                    detection_method: 'rtt'
+                }
+            };
+        } else {
+            // RTT >= 15ms，不在台灣，但記錄 RTT 資訊（不包含 country）
+            return {
+                ...apiResult,
+                cloud_provider: {
+                    rtt: rtt,
+                    detection_method: 'rtt'
+                }
+            };
+        }
+    }
+
+    // 如果 RTT 測試失敗或沒有進行測試，不記錄 cloud_provider
+    return {
+        ...apiResult,
+        cloud_provider: null
+    };
 }
 
 function checkLocally(ipInfoResults, cloudProviderInfo) {
@@ -760,7 +993,18 @@ function checkLocally(ipInfoResults, cloudProviderInfo) {
     for (const result of ipInfoResults) {
         if (result.error) continue;
 
-        const isDomestic = result.country === 'TW';
+        // 優先使用 cloud_provider.country 判斷
+        let isDomestic;
+        if (result.cloud_provider && result.cloud_provider.country === 'tw') {
+            // 經過 header 或 RTT 測試確認在台灣
+            isDomestic = true;
+        } else if (result.country === 'TW') {
+            // 直接從 ipinfo 判斷在台灣
+            isDomestic = true;
+        } else {
+            isDomestic = false;
+        }
+
         const providerMatch = getCloudProviderMatch(result.org, cloudProviderInfo);
         const isCloud = !!providerMatch;
         const regionKey = isDomestic ? 'domestic' : 'foreign';
@@ -776,7 +1020,8 @@ function checkLocally(ipInfoResults, cloudProviderInfo) {
             region: regionKey,
             provider: providerMatch,
             source: result.source,
-            location: `${result.country} (${result.org || 'Unknown'})`
+            location: `${result.country} (${result.org || 'Unknown'})`,
+            cloudProvider: result.cloud_provider
         });
     }
 
@@ -870,7 +1115,7 @@ function formatDomainDetail(result, cleanedData, resilience) {
         req => new URL(req.url).hostname === result.domain
     );
 
-    return {
+    const detail = {
         originalUrl: originalRequest?.url,
         type: originalRequest?.type,
         ipinfo: {
@@ -886,6 +1131,13 @@ function formatDomainDetail(result, cleanedData, resilience) {
         },
         category: resilience.details.find(d => d.domain === result.domain)?.category
     };
+
+    // 只有在 cloud_provider 不為 null 時才加入
+    if (result.cloud_provider) {
+        detail.cloud_provider = result.cloud_provider;
+    }
+
+    return detail;
 }
 
 async function checkWebsiteResilience(url, options = {}) {
@@ -937,6 +1189,8 @@ async function checkWebsiteResilience(url, options = {}) {
         let harResult = null;
         let retriedWithWww = false;
         let retriedWithHeadful = false;
+        // 保存原始 URL，用於 non-headless 重試時從原始版本開始
+        const originalUrl = url;
         // 檢查是否需要嘗試 www 版本
         let shouldRetryWithWww = false;
         try {
@@ -957,6 +1211,7 @@ async function checkWebsiteResilience(url, options = {}) {
 
         if (options.headless === false) {
             // 強制使用非 headless 模式，跳過 headless 重試流程
+            // 重試流程：1. non-headless non-www -> 2. non-headless www
             try {
                 harResult = await collectHARAndCanonical(url, {
                     timeout: options.timeout || 120000,
@@ -966,8 +1221,8 @@ async function checkWebsiteResilience(url, options = {}) {
             } catch (error) {
                 lastError = error;
 
-                // 如果失敗，嘗試非 headless 版本 prefix www
-                if (shouldRetryWithWww) {
+                // 如果失敗，嘗試 non-headless www
+                if (shouldRetryWithWww && !harResult) {
                     try {
                         const urlObj = new URL(url);
                         urlObj.hostname = 'www.' + urlObj.hostname;
@@ -982,24 +1237,21 @@ async function checkWebsiteResilience(url, options = {}) {
                             headless: false
                         });
                         // 如果成功，更新 url 和 inputURL
-                        url = wwwUrl;
-                        inputURL = wwwUrl;
+                        if (harResult) {
+                            url = wwwUrl;
+                            inputURL = wwwUrl;
+                        }
                     } catch (finalError) {
-                        // 所有重試都失敗，更新 URL 為 www 版本（如果適用），然後拋出最後的錯誤
-                        const urlObj = new URL(url);
-                        urlObj.hostname = 'www.' + urlObj.hostname;
-                        const wwwUrl = urlObj.toString();
-                        url = wwwUrl;
-                        inputURL = wwwUrl;
                         throw finalError;
                     }
-                } else {
+                } else if (!harResult) {
                     throw error;
                 }
             }
         } else {
-            // 預設重試流程：1. 一般版本（headless） -> 2. 一般版本 prefix www -> 3. 非 headless 版本 -> 4. 非 headless 版本 prefix www
-            // 1. 嘗試一般版本（headless）
+            // 預設重試流程：1. headless non-www -> 2. headless www -> 3. non-headless non-www -> 4. non-headless www
+            // 如果其中一個成功即停止，如失敗則進入下一個
+            // 1. 嘗試 headless non-www
             try {
                 harResult = await collectHARAndCanonical(url, {
                     timeout: options.timeout || 120000,
@@ -1009,8 +1261,8 @@ async function checkWebsiteResilience(url, options = {}) {
             } catch (error) {
                 lastError = error;
 
-                // 2. 如果失敗，嘗試一般版本 prefix www（headless + www）
-                if (shouldRetryWithWww) {
+                // 2. 如果失敗，嘗試 headless www
+                if (shouldRetryWithWww && !harResult) {
                     try {
                         const urlObj = new URL(url);
                         urlObj.hostname = 'www.' + urlObj.hostname;
@@ -1025,31 +1277,38 @@ async function checkWebsiteResilience(url, options = {}) {
                             headless: true
                         });
                         // 如果成功，更新 url 和 inputURL
-                        url = wwwUrl;
-                        inputURL = wwwUrl;
+                        if (harResult) {
+                            url = wwwUrl;
+                            inputURL = wwwUrl;
+                        }
                     } catch (wwwError) {
                         lastError = wwwError;
                     }
                 }
 
-                // 3. 如果還是失敗，嘗試非 headless 版本
+                // 3. 如果還是失敗，嘗試 non-headless non-www
                 if (!harResult) {
                     try {
-                        console.log(`發生錯誤，嘗試使用非 headless 模式重試: ${url}`);
+                        console.log(`發生錯誤，嘗試使用非 headless 模式重試: ${originalUrl}`);
                         retriedWithHeadful = true;
 
-                        harResult = await collectHARAndCanonical(url, {
+                        harResult = await collectHARAndCanonical(originalUrl, {
                             timeout: options.timeout || 120000,
                             debug: options.debug,
                             headless: false
                         });
+                        // 如果成功，更新 url 和 inputURL
+                        if (harResult) {
+                            url = originalUrl;
+                            inputURL = originalUrl;
+                        }
                     } catch (headfulError) {
                         lastError = headfulError;
 
-                        // 4. 如果還是失敗，嘗試非 headless 版本 prefix www
-                        if (shouldRetryWithWww) {
+                        // 4. 如果還是失敗，嘗試 non-headless www
+                        if (shouldRetryWithWww && !harResult) {
                             try {
-                                const urlObj = new URL(url);
+                                const urlObj = new URL(originalUrl);
                                 urlObj.hostname = 'www.' + urlObj.hostname;
                                 const wwwUrl = urlObj.toString();
 
@@ -1062,20 +1321,15 @@ async function checkWebsiteResilience(url, options = {}) {
                                     headless: false
                                 });
                                 // 如果成功，更新 url 和 inputURL
-                                url = wwwUrl;
-                                inputURL = wwwUrl;
-                            } catch (finalError) {
-                                // 所有重試都失敗，更新 URL 為 www 版本（如果適用），然後拋出最後的錯誤
-                                if (shouldRetryWithWww) {
-                                    const urlObj = new URL(url);
-                                    urlObj.hostname = 'www.' + urlObj.hostname;
-                                    const wwwUrl = urlObj.toString();
+                                if (harResult) {
                                     url = wwwUrl;
                                     inputURL = wwwUrl;
                                 }
+                            } catch (finalError) {
+                                // 所有重試都失敗，拋出最後的錯誤
                                 throw finalError;
                             }
-                        } else {
+                        } else if (!harResult) {
                             // 不需要嘗試 www 版本，直接拋出錯誤
                             throw headfulError;
                         }
@@ -1210,7 +1464,21 @@ async function checkWebsiteResilience(url, options = {}) {
             }
         }
 
-        // 3. 檢查每個域名
+        // 3. 建立 domain 到 URL 的映射，以便找到對應的 headers
+        const domainToUrlMap = new Map();
+        Object.values(cleanedData).forEach(req => {
+            try {
+                const urlObj = new URL(req.url);
+                const hostname = urlObj.hostname;
+                if (!domainToUrlMap.has(hostname)) {
+                    domainToUrlMap.set(hostname, req.url);
+                }
+            } catch {
+                // 忽略 URL 解析錯誤
+            }
+        });
+
+        // 4. 檢查每個域名
         if (options.debug) {
             console.log('\n[DEBUG] 開始檢查域名 IP 位置...');
         }
@@ -1219,23 +1487,31 @@ async function checkWebsiteResilience(url, options = {}) {
                 if (options.debug) {
                     console.log(`[DEBUG] 檢查 ${domain}...`);
                 }
+
+                // 找到對應的 URL
+                const domainUrl = domainToUrlMap.get(domain);
+
                 const result = await checkIPLocation(domain, customDNS, {
                     useCache: options.useCache !== false,
                     token: options.token,
-                    debug: options.debug
+                    debug: options.debug,
+                    responseHeaders: harResult.responseHeaders,
+                    domainUrl: domainUrl
                 });
+
                 if (options.debug) {
-                    console.log(`[DEBUG] ${domain}: ${result.ip || 'N/A'} (${result.country || 'N/A'}) ${result.source?.includes('cached') ? '(快取)' : ''}`);
+                    const method = result.cloud_provider?.detection_method || 'ipinfo';
+                    console.log(`[DEBUG] ${domain}: ${result.ip || 'N/A'} (${result.country || 'N/A'}) [${method}] ${result.source?.includes('cached') ? '(快取)' : ''}`);
                 }
                 return result;
             })
         );
 
-        // 4. 計算韌性分數
+        // 5. 計算韌性分數
         const cloudProviderInfo = await loadcloudProviderInfo();
         const resilience = checkLocally(locationResults, cloudProviderInfo);
 
-        // 5. 產生報告
+        // 6. 產生報告
         console.log('\n檢測結果:');
         console.log('-------------------');
         console.log(`境內/雲端: ${resilience.summary.domestic.cloud}`);
