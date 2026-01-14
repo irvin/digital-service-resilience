@@ -381,7 +381,8 @@ async function collectHARAndCanonical(url, options = {}) {
 
     const context = await browser.newContext({
         bypassCSP: true,
-        ignoreHTTPSErrors: true
+        ignoreHTTPSErrors: true,
+        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     });
 
     const page = await context.newPage();
@@ -493,15 +494,24 @@ async function collectHARAndCanonical(url, options = {}) {
         }
 
         // 嘗試獲取 canonical URL
-        const canonical = await page.evaluate((originalURL) => {
-            // 優先使用 canonical 標籤
-            const canonicalLink = document.querySelector('link[rel="canonical"]');
-            if (canonicalLink) {
-                return canonicalLink.href;
+        let canonical = url; // 預設使用原始 URL
+        try {
+            canonical = await page.evaluate((originalURL) => {
+                // 優先使用 canonical 標籤
+                const canonicalLink = document.querySelector('link[rel="canonical"]');
+                if (canonicalLink) {
+                    return canonicalLink.href;
+                }
+                // 如果沒有 canonical 標籤，使用原始 URL
+                return originalURL;
+            }, url);
+        } catch (evaluateError) {
+            // 如果 evaluate 失敗（例如頁面導航導致執行上下文被破壞），使用原始 URL
+            if (debug) {
+                console.log(`[DEBUG] 無法取得 canonical URL: ${evaluateError.message}，使用原始 URL`);
             }
-            // 如果沒有 canonical 標籤，使用原始 URL
-            return originalURL;
-        }, url);
+            canonical = url;
+        }
 
         if (debug) {
             console.log(`[DEBUG] Canonical URL: ${canonical}`);
@@ -1179,6 +1189,8 @@ async function checkWebsiteResilience(url, options = {}) {
         let harResult = null;
         let retriedWithWww = false;
         let retriedWithHeadful = false;
+        // 保存原始 URL，用於 non-headless 重試時從原始版本開始
+        const originalUrl = url;
         // 檢查是否需要嘗試 www 版本
         let shouldRetryWithWww = false;
         try {
@@ -1199,6 +1211,7 @@ async function checkWebsiteResilience(url, options = {}) {
 
         if (options.headless === false) {
             // 強制使用非 headless 模式，跳過 headless 重試流程
+            // 重試流程：1. non-headless non-www -> 2. non-headless www
             try {
                 harResult = await collectHARAndCanonical(url, {
                     timeout: options.timeout || 120000,
@@ -1208,8 +1221,8 @@ async function checkWebsiteResilience(url, options = {}) {
             } catch (error) {
                 lastError = error;
 
-                // 如果失敗，嘗試非 headless 版本 prefix www
-                if (shouldRetryWithWww) {
+                // 如果失敗，嘗試 non-headless www
+                if (shouldRetryWithWww && !harResult) {
                     try {
                         const urlObj = new URL(url);
                         urlObj.hostname = 'www.' + urlObj.hostname;
@@ -1224,24 +1237,21 @@ async function checkWebsiteResilience(url, options = {}) {
                             headless: false
                         });
                         // 如果成功，更新 url 和 inputURL
-                        url = wwwUrl;
-                        inputURL = wwwUrl;
+                        if (harResult) {
+                            url = wwwUrl;
+                            inputURL = wwwUrl;
+                        }
                     } catch (finalError) {
-                        // 所有重試都失敗，更新 URL 為 www 版本（如果適用），然後拋出最後的錯誤
-                        const urlObj = new URL(url);
-                        urlObj.hostname = 'www.' + urlObj.hostname;
-                        const wwwUrl = urlObj.toString();
-                        url = wwwUrl;
-                        inputURL = wwwUrl;
                         throw finalError;
                     }
-                } else {
+                } else if (!harResult) {
                     throw error;
                 }
             }
         } else {
-            // 預設重試流程：1. 一般版本（headless） -> 2. 一般版本 prefix www -> 3. 非 headless 版本 -> 4. 非 headless 版本 prefix www
-            // 1. 嘗試一般版本（headless）
+            // 預設重試流程：1. headless non-www -> 2. headless www -> 3. non-headless non-www -> 4. non-headless www
+            // 如果其中一個成功即停止，如失敗則進入下一個
+            // 1. 嘗試 headless non-www
             try {
                 harResult = await collectHARAndCanonical(url, {
                     timeout: options.timeout || 120000,
@@ -1251,8 +1261,8 @@ async function checkWebsiteResilience(url, options = {}) {
             } catch (error) {
                 lastError = error;
 
-                // 2. 如果失敗，嘗試一般版本 prefix www（headless + www）
-                if (shouldRetryWithWww) {
+                // 2. 如果失敗，嘗試 headless www
+                if (shouldRetryWithWww && !harResult) {
                     try {
                         const urlObj = new URL(url);
                         urlObj.hostname = 'www.' + urlObj.hostname;
@@ -1267,31 +1277,38 @@ async function checkWebsiteResilience(url, options = {}) {
                             headless: true
                         });
                         // 如果成功，更新 url 和 inputURL
-                        url = wwwUrl;
-                        inputURL = wwwUrl;
+                        if (harResult) {
+                            url = wwwUrl;
+                            inputURL = wwwUrl;
+                        }
                     } catch (wwwError) {
                         lastError = wwwError;
                     }
                 }
 
-                // 3. 如果還是失敗，嘗試非 headless 版本
+                // 3. 如果還是失敗，嘗試 non-headless non-www
                 if (!harResult) {
                     try {
-                        console.log(`發生錯誤，嘗試使用非 headless 模式重試: ${url}`);
+                        console.log(`發生錯誤，嘗試使用非 headless 模式重試: ${originalUrl}`);
                         retriedWithHeadful = true;
 
-                        harResult = await collectHARAndCanonical(url, {
+                        harResult = await collectHARAndCanonical(originalUrl, {
                             timeout: options.timeout || 120000,
                             debug: options.debug,
                             headless: false
                         });
+                        // 如果成功，更新 url 和 inputURL
+                        if (harResult) {
+                            url = originalUrl;
+                            inputURL = originalUrl;
+                        }
                     } catch (headfulError) {
                         lastError = headfulError;
 
-                        // 4. 如果還是失敗，嘗試非 headless 版本 prefix www
-                        if (shouldRetryWithWww) {
+                        // 4. 如果還是失敗，嘗試 non-headless www
+                        if (shouldRetryWithWww && !harResult) {
                             try {
-                                const urlObj = new URL(url);
+                                const urlObj = new URL(originalUrl);
                                 urlObj.hostname = 'www.' + urlObj.hostname;
                                 const wwwUrl = urlObj.toString();
 
@@ -1304,20 +1321,15 @@ async function checkWebsiteResilience(url, options = {}) {
                                     headless: false
                                 });
                                 // 如果成功，更新 url 和 inputURL
-                                url = wwwUrl;
-                                inputURL = wwwUrl;
-                            } catch (finalError) {
-                                // 所有重試都失敗，更新 URL 為 www 版本（如果適用），然後拋出最後的錯誤
-                                if (shouldRetryWithWww) {
-                                    const urlObj = new URL(url);
-                                    urlObj.hostname = 'www.' + urlObj.hostname;
-                                    const wwwUrl = urlObj.toString();
+                                if (harResult) {
                                     url = wwwUrl;
                                     inputURL = wwwUrl;
                                 }
+                            } catch (finalError) {
+                                // 所有重試都失敗，拋出最後的錯誤
                                 throw finalError;
                             }
-                        } else {
+                        } else if (!harResult) {
                             // 不需要嘗試 www 版本，直接拋出錯誤
                             throw headfulError;
                         }
