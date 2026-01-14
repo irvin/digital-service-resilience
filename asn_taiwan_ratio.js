@@ -1,20 +1,16 @@
 const fs = require('fs');
 const path = require('path');
 
-// 目標 ASN 列表
+// 目標 ASN 列表（只統計國際公有雲）
 const TARGET_ASNS = {
   'AS15169': 'Google LLC',
   'AS396982': 'Google LLC',
   'AS13335': 'Cloudflare, Inc.',
   'AS16509': 'Amazon.com, Inc.',
-  'AS3462': 'Data Communication Business Group',
-  'AS4782': 'Data Communication Business Group',
   'AS54113': 'Fastly, Inc.',
   'AS16625': 'Akamai Technologies, Inc.',
   'AS20940': 'Akamai Technologies, Inc.',
   'AS8075': 'Microsoft Corporation',
-  'AS9919': 'New Century InfoComm Tech Co., Ltd.',
-  'AS9924': 'Taiwan Fixed Network',
 };
 
 // 國際公有雲（排除台灣本地 ISP）
@@ -154,12 +150,13 @@ async function main() {
         continue;
       }
 
-      const country = detail.ipinfo.country;
       const companyName = TARGET_ASNS[asn];
+      const isDomestic = detail.category?.startsWith('domestic/');
+
       stats[asn].total++;
       stats[asn].websites.add(websiteDomain);
 
-      if (country === 'TW') {
+      if (isDomestic) {
         stats[asn].taiwan++;
         stats[asn].taiwanWebsites.add(websiteDomain);
       } else {
