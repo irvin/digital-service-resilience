@@ -281,7 +281,7 @@ node batch-test.js --debug --adblock-url https://filter.futa.gg/hosts_abp.txt --
 #### 批次測試結果
 
 批次測試會：
-1. 為每個網站產生獨立的檢測結果檔案，儲存在 `test_results/` 目錄
+1. 為每個網站產生獨立的檢測結果檔案，儲存在 `test-results/` 目錄
 2. 在根目錄產生總結報告 `batch_summary_<timestamp>.json`，包含：
    - 測試參數
    - 統計資訊（總數、成功、失敗、跳過）
