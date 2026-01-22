@@ -658,6 +658,9 @@ function getIgnoreReason(hostname, targetHostname = null) {
 
 function cleanHARData(requests, targetHostname = null) {
     return requests.filter(request => {
+        if (request.url && request.url.startsWith('blob:')) {
+            return false;
+        }
         try {
             const url = new URL(request.url);
             return !shouldIgnoreDomain(url.hostname, targetHostname);
@@ -1566,7 +1569,7 @@ async function checkWebsiteResilience(url, options = {}) {
         // 如果指定要儲存結果
         if (options.save) {
             // 確保目錄存在
-            await fs.mkdir('test_results', { recursive: true });
+            await fs.mkdir('test-results', { recursive: true });
 
             // 自動生成輸出檔名
             // 如果原始 URL 是頂層網域，使用原始 URL；否則使用 canonical URL（如果有的話）
@@ -1581,7 +1584,7 @@ async function checkWebsiteResilience(url, options = {}) {
                 filename = filename.slice(0, 95);
             }
 
-            const outputPath = path.resolve(`test_results/${filename}.json`);
+            const outputPath = path.resolve(`test-results/${filename}.json`);
 
             // 儲存結果
             await fs.writeFile(outputPath, JSON.stringify(result, null, 2));
@@ -1714,8 +1717,8 @@ async function checkWebsiteResilience(url, options = {}) {
         // 儲存錯誤結果到 JSON 檔案
         if (options.save) {
             try {
-                // 確保 test_results/_error 目錄存在
-                const errorDir = path.join('test_results', '_error');
+                // 確保 test-results/_error 目錄存在
+                const errorDir = path.join('test-results', '_error');
                 await fs.mkdir(errorDir, { recursive: true });
 
                 // 從錯誤結果中取得 URL 資訊

@@ -16,3 +16,5 @@
 - [ ] mv checkWebsiteResilience -> checkWebsiteLocally
 - [x] batch test 結束後自動更新 statistic
 - [ ] 確認 Error: Error 如何修正
+- [ ] 在 JSON 結果中記錄實際測試的 URL（actualTestUrl），特別是重試後使用的 URL（如 www 版本）
+- [ ] 在 log 中明確記錄最終實際測試的 URL，而不只是重試時的提示

@@ -251,8 +251,8 @@ async function batchTest(options = {}) {
     if (save) {
         const timestamp = Date.now();
 
-        // 確保 test_results/_logs 目錄存在
-        const logsDir = path.join('test_results', '_logs');
+        // 確保 test-results/_logs 目錄存在
+        const logsDir = path.join('test-results', '_logs');
         await fs.mkdir(logsDir, { recursive: true });
 
         const summaryPath = path.join(logsDir, `batch_summary_${timestamp}.json`);
