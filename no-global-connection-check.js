@@ -658,6 +658,9 @@ function getIgnoreReason(hostname, targetHostname = null) {
 
 function cleanHARData(requests, targetHostname = null) {
     return requests.filter(request => {
+        if (request.url && request.url.startsWith('blob:')) {
+            return false;
+        }
         try {
             const url = new URL(request.url);
             return !shouldIgnoreDomain(url.hostname, targetHostname);
