@@ -1,8 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 
-// 以目前腳本所在位置為基準，找到 test_results 目錄
-const DIR = path.resolve(__dirname, 'test_results');
+// 以目前腳本所在位置為基準，找到 test-results 目錄
+const DIR = path.resolve(__dirname, 'test-results');
 const OUTPUT = path.join(DIR, 'statistic.tsv');
 const MERGED_LISTS_PATH = path.resolve(
   __dirname,
@@ -110,7 +110,7 @@ async function main() {
     .filter((normalizedUrl) => dataMap.has(normalizedUrl))
     .map((normalizedUrl) => dataMap.get(normalizedUrl));
 
-  // 如果 merged_lists_tw.json 中沒有，但 test_results 中有，則附加在最後
+  // 如果 merged_lists_tw.json 中沒有，但 test-results 中有，則附加在最後
   const remainingData = Array.from(dataMap.entries())
     .filter(([normalizedUrl]) => !orderMap.has(normalizedUrl))
     .map(([, data]) => data);
