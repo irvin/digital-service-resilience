@@ -28,28 +28,7 @@
 
 ## 韌性檢測結果
 
-
-| 服務 | 斷網耐受性 | 檢測紀錄 |
-| -------- | -------- | -------- |
-| Pchome 24 |  | [手動檢測紀錄](https://g0v.hackmd.io/5siiuEN1RAuFAI2H7l-phQ)
-| MoMo 產品頁 | Ｘ | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=https://www.momoshop.com.tw/category/LgrpCategory.jsp?l_code=2180000000)、[手動檢測紀錄](https://g0v.hackmd.io/9JfXRBRbSV2wE3ULGIL-XA)
-| 蝦皮購物 |  | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=google.com)
-| Google | Ｏ | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=google.com)
-| Gmail | Ｏ  | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=mail.google.com)
-| Google Maps | Ｏ  | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=maps.google.com)
-| Yahoo Mail | Ｏ | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=mail.yahoo.com)
-| Bing | Ｘ | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=www.bing.com)
-| 華視新聞網 | ？ | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=https://news.cts.com.tw/cna/politics/202502/202502232440801.html)
-| 中央社 | Ｘ | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=https://www.cna.com.tw/news/afe/202210220159.aspx)
-| 公視新聞 | Ｏ | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=https://news.pts.org.tw/article/739060)
-| 中央廣播電台 | Ｘ | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=www.rti.org.tw)
-| 數位發展部 | ？ | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=moda.gov.tw)
-| 國防部 | ？ | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=www.mnd.gov.tw)
-| 總統府 | Ｏ | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=www.president.gov.tw)
-| 內政部警政署防空避難專區 | Ｏ | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=adr.npa.gov.tw)
-| g0v | Ｘ | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=g0v.tw)
-| OCF | Ｘ | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=ocf.tw)
-| SITCON | Ｘ | [檢測紀錄](https://irvin.github.io/web-resilience-test-result/?url=sitcon.org)
+-> 請查閱： [海纜斷掉時，網站會動嗎？](https://resilience.ocf.tw/web/)
 
 ---
 
