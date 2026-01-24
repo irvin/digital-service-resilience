@@ -310,6 +310,89 @@ node batch-test.js --debug --adblock-url https://filter.futa.gg/hosts_abp.txt --
 - ?：使用具有台灣節點的雲端服務（如 Google Cloud、AWS 等）
 - X：位於境外且非雲端服務
 
+## 如何手動新增單一網站測試
+
+當你想要測試一個新的網站並將結果加入到結果庫時，可以按照以下步驟進行：
+
+### 步驟 1：執行單一網站測試並儲存結果
+
+```bash
+npm run check --save https://www.example.com
+```
+
+**說明：**
+- `--save` 參數會將檢測結果儲存到 `test-results/` 目錄
+- 結果會以 JSON 格式儲存，檔名格式為 `{domain}.json`
+- 例如：測試 `https://www.article19.org` 會產生 `test-results/www.article19.org.json`
+
+**可選參數：**
+- `--debug`：顯示詳細的檢測過程資訊
+- `--adblock false`：不使用 adblock 清單過濾
+- `--timeout N`：設定頁面載入 timeout（秒，預設 120）
+
+### 步驟 2：更新統計資料
+
+執行以下指令更新 `statistic.tsv`：
+
+```bash
+node generate_statistic.js
+```
+
+**說明：**
+- 此腳本會讀取 `test-results/` 目錄下的所有 JSON 檔案
+- 生成或更新 `test-results/statistic.tsv` 統計檔案
+- 統計資料會按照 `top-traffic-list-taiwan/merged_lists_tw.json` 的順序排序
+
+### 步驟 3：提交結果到 Git
+
+`test-results/` 是一個 Git submodule，需要將結果提交並推送：
+
+```bash
+cd test-results
+git add .
+git commit -m "新增網站測試結果: example.com"
+git push
+```
+
+### 步驟 4：（可選）更新主專案的 submodule 引用
+
+如果 `test-results` 是 submodule，在主專案中也需要更新引用：
+
+```bash
+git add test-results
+git commit -m "更新 test-results submodule"
+git push
+```
+
+### 手動維護測試清單
+
+如果要測試的網站不在自動清單中，可以編輯 `manual_curated_list_tw.json` 加入該網站：
+
+```json
+[
+  {
+    "website": "example.com",
+    "url": "https://www.example.com"
+  },
+  {
+    "website": "another-site.org",
+    "url": "https://another-site.org"
+  }
+]
+```
+
+**說明：**
+- `website`：網站的主要域名（用於識別）
+- `url`：要測試的完整 URL（可以是首頁或特定頁面）
+- 編輯後，執行 `generate_statistic.js` 時會自動包含這些網站
+
+### 注意事項
+
+1. **檔案命名**：結果檔案會根據 URL 自動命名，通常會移除 `https://` 和尾隨的 `/`
+2. **重複測試**：如果同一個網站已經有測試結果，新的結果會覆蓋舊的檔案
+3. **統計資料順序**：`generate_statistic.js` 會優先按照 `merged_lists_tw.json` 的順序排列，不在清單中的網站會附加在最後
+4. **Submodule 管理**：`test-results/` 是一個獨立的 Git repository（submodule），需要分別提交和推送
+
 ### 範例輸出
 ```
 開始檢測網站: https://example.com
