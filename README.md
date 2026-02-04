@@ -333,16 +333,6 @@ git commit -m "新增網站測試結果: example.com"
 git push
 ```
 
-### 步驟 4：（可選）更新主專案的 submodule 引用
-
-如果 `test-results` 是 submodule，在主專案中也需要更新引用：
-
-```bash
-git add test-results
-git commit -m "更新 test-results submodule"
-git push
-```
-
 ### 手動維護測試清單
 
 如果要測試的網站不在自動清單中，可以編輯 `manual_curated_list_tw.json` 加入該網站：
